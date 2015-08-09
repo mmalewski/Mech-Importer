@@ -7,6 +7,7 @@
 # version 1.33 (3/10/14) - Updated to properly assign materials based on material type, instead of guessing by position in array
 # version 1.5 (6/12/14) - Modified to work with the new Clan mech files
 # version 1.6 (12/30/14) - Fixing bugs with Wave 2 mechs, variant/window materials assigned, general cleanup
+# Version 1.61 (8/9/15)  - Bug fixes (Blender 2.73+ crash, atlas_movie.cdf issue)
 
 # Input is the .cdf file in the mech directory for the mech you want
 # output is the text of what you want to put into Blender.  It also outputs to import.txt in the directory you
@@ -49,7 +50,7 @@ $scripttristoquads = "bpy.ops.mesh.tris_convert_to_quads()"
 $scriptseteditmode = "bpy.ops.object.mode_set(mode = `"EDIT`")"
 $scriptsetobjectmode = "bpy.ops.object.mode_set(mode = `"OBJECT`")"
 #$scriptclearmaterial = "bpy.context.object.data.materials.pop(0, update_data=True)"
-$scriptclearmaterial = "bpy.context.object.data.materials.clear()"   #only works with 2.69 or newer
+$scriptclearmaterial = "bpy.context.object.data.materials.clear(update_data=True)"   #only works with 2.69 or newer. Bug fix 1.61:  added update_data
 
 # if no argument is found, try to find the cdf file in the current directory.
 $directory = (Get-ChildItem).directory[0].name  # $directory should have the name of the mech
@@ -65,7 +66,12 @@ if ( $args[0] ) {  # argument passed.  See if it's the cdf file.
     }
 } # no args entered.  Check current directory.
 if ( (get-childitem *.cdf)) {
-    $cdffilelocation = Get-childitem *.cdf
+    #$cdffilelocation = Get-childitem *.cdf   # Doesn't work if there is more than one .cdf file (looking at you Atlas)
+	foreach ($file in (Get-ChildItem *.cdf)) {
+		if (!$file.Name.Contains("movie")) {
+			$cdffilelocation = this;
+		}
+	}
 } else {
     write-host "Unable to find .cdf file." -ForegroundColor Red
     Get-Usage
