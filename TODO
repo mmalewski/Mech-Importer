@@ -1,0 +1,11 @@
+To do file.
+
+Current version:  1.6 (12/31/14)
+
+Known bugs
+- Atlas mech has 2 .cdf files (one is atlas_movie.cdf), which causes script to fail.
+- import causes Blender to crash due to material clear error
+
+Goals
+1.7
+- Work with the cgf-exporter.exe tool (Get rid of remove doubles, tris to quads, materials for Cycles and BI)
