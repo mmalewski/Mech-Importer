@@ -1,4 +1,4 @@
-﻿# Powershell script to create a text output that can be put in the Blender script engine to import
+# Powershell script to create a text output that can be put in the Blender script engine to import
 # all the mech chassis components into the proper position.
 # Geoff Gerber, 10/27/2013 (markemp@gmail.com)
 # 1/20/2014 - strips material from obj, removes doubles, tris to quads
@@ -7,7 +7,7 @@
 # version 1.33 (3/10/14) - Updated to properly assign materials based on material type, instead of guessing by position in array
 # version 1.5 (6/12/14) - Modified to work with the new Clan mech files
 # version 1.6 (12/30/14) - Fixing bugs with Wave 2 mechs, variant/window materials assigned, general cleanup
-# Version 1.61 (8/9/15)  - Bug fixes (Blender 2.73+ crash, atlas_movie.cdf issue)
+# Version 1.61 (8/9/15)  - Bug fixes (Blender 2.73+ crash, atlas_movie.cdf issue, material cleanup)
 
 # Input is the .cdf file in the mech directory for the mech you want
 # output is the text of what you want to put into Blender.  It also outputs to import.txt in the directory you
@@ -49,7 +49,7 @@ $scriptremovedoubles = "bpy.ops.mesh.remove_doubles()"
 $scripttristoquads = "bpy.ops.mesh.tris_convert_to_quads()"
 $scriptseteditmode = "bpy.ops.object.mode_set(mode = `"EDIT`")"
 $scriptsetobjectmode = "bpy.ops.object.mode_set(mode = `"OBJECT`")"
-#$scriptclearmaterial = "bpy.context.object.data.materials.pop(0, update_data=True)"
+$scriptclearmaterial = "bpy.context.object.data.materials.pop(0, update_data=True)"
 $scriptclearmaterial = "bpy.context.object.data.materials.clear(update_data=True)"   #only works with 2.69 or newer. Bug fix 1.61:  added update_data
 
 # if no argument is found, try to find the cdf file in the current directory.
@@ -69,7 +69,7 @@ if ( (get-childitem *.cdf)) {
     #$cdffilelocation = Get-childitem *.cdf   # Doesn't work if there is more than one .cdf file (looking at you Atlas)
 	foreach ($file in (Get-ChildItem *.cdf)) {
 		if (!$file.Name.Contains("movie")) {
-			$cdffilelocation = this;
+			$cdffilelocation = $file;
 		}
 	}
 } else {
@@ -81,6 +81,12 @@ if ( (get-childitem *.cdf)) {
 if ( !(test-path $cdffilelocation)) {
 	write-host "Unable to find .cdf file" -ForegroundColor Red
 	exit
+}
+
+# Delete import.txt if it already exists.
+
+if (Test-Path "import.txt") {
+	Remove-Item "import.txt"
 }
 
 # Get mech name from .cdf file name
@@ -289,29 +295,30 @@ $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
     #write-host "Matname for $objectname is $matname"
 
     # Time to generate the commands (in $parsedline, an array)
-	$parsedline = @()
+    $parsedline = @()
     # if it's a cockpit item, it'll have multiple groups.  to avoid screwing up naming, we will import these keeping the vertex
     # order with split_mode('OFF').  We do NOT want to remove doubles though, as this destroys the UVMap.
     if ( $objectname.Contains("cockpit")) {
         $parsedline += $scriptimport + "(filepath=`"$basedir\\$binding_modified`",use_groups_as_vgroups=True,split_mode=`'OFF`')" }
     else {
-	    $parsedline += $scriptimport + "(filepath=`"$basedir\\$binding_modified`",use_groups_as_vgroups=True,split_mode=`'OFF`')" }
+	    $parsedline += $scriptimport + "(filepath=`"$basedir\\$binding_modified`",use_groups_as_vgroups=True,split_mode=`'OFF`')" 
+    }
     
     # set new object as the active object
     $parsedline += $scriptscene + "=bpy.data.objects[`"$objectname`"]"
     # Parent the object to the Armature:  Assumes armature name is Armature and that it's been imported!
     # $parsedline += $scriptscene + "=bpy.data.objects[`"Armature`"]"
     # We may at this point (someday) to replace $objectname (above) with the $Aname, but for now let's stick with $objectname
-	$parsedline += $scriptrotationmode 
-	$parsedline += $scriptrotation + "=[$rotation]"
-	$parsedline += $scripttransform + "(value=($position))"
-	$parsedline += $scriptclearmaterial
-	$parsedline += $scriptseteditmode
-	# Check to see if it's a cockpit item, and if so don't remove doubles!
-    if ( !$objectname.Contains("cockpit")) {
-        $parsedline += $scriptremovedoubles }
+    $parsedline += $scriptrotationmode 
+    $parsedline += $scriptrotation + "=[$rotation]"
+    $parsedline += $scripttransform + "(value=($position))"
+    $parsedline += $scriptclearmaterial	          # Not sure if I want to do this or not.  Might wipe the BI materials from the .mtl file.
+    $parsedline += $scriptseteditmode
+    # Check to see if it's a cockpit item, and if so don't remove doubles!  Removed 1.61; use cgf-exporter to get good geometry.
+    #if ( !$objectname.Contains("cockpit")) {
+    #    $parsedline += $scriptremovedoubles }
 
-	$parsedline += $scripttristoquads
+    # $parsedline += $scripttristoquads
     # Create a vertex group with the bone name.  This makes parenting to armature super easy!
     $parsedline += "bpy.ops.object.vertex_group_add()"
     $parsedline += "bpy.context.object.vertex_groups.active.name = `"$bonename`""
@@ -319,13 +326,13 @@ $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
     $parsedline += "bpy.ops.object.vertex_group_assign()"
     $parsedline += "bpy.ops.mesh.select_all(action=`'TOGGLE`')"
 
-	$parsedline += $scriptsetobjectmode
+    $parsedline += $scriptsetobjectmode
     $parsedline += "bpy.context.object.data.materials.append($matname)"
 
-	foreach ( $line in $parsedline ) {
-		#write-host $line
-		$line >> .\import.txt
-	}
+    foreach ( $line in $parsedline ) {
+	#write-host $line
+        $line >> .\import.txt
+    }
 }
 "" >> .\import.txt # Send a final line feed.
 
