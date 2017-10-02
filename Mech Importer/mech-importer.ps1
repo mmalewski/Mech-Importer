@@ -63,7 +63,8 @@ $scriptimportCollada = "bpy.ops.wm.collada_import"
 $scriptscene = "bpy.context.scene.objects.active"
 $scriptrotationmode = "bpy.context.active_object.rotation_mode=`"QUATERNION`""
 $scriptrotation = "bpy.context.active_object.rotation_quaternion"
-$scripttransform = "bpy.ops.transform.translate"
+#$scripttransform = "bpy.ops.transform.translate"
+$scripttransform = "bpy.context.active_object.location"
 $scriptremovedoubles = "bpy.ops.mesh.remove_doubles()"
 $scripttristoquads = "bpy.ops.mesh.tris_convert_to_quads()"
 $scriptseteditmode = "bpy.ops.object.mode_set(mode = `"EDIT`")"
@@ -170,6 +171,7 @@ $matfile.Material.SubMaterials.Material | % {
         if ( $_.Map -eq "Diffuse") {
             $matdiffuse = $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\")  #assumes diffuse is in slot 0
             "matDiffuse = bpy.data.images.load(filepath=`"$basedir\\$matdiffuse`")" >> .\import.txt
+			"shaderPrincipleBSDF = TreeNodes.nodes.new('ShaderNodeBsdfPrincipled')" > .\import.txt
             "shaderDiffuse=TreeNodes.nodes.new('ShaderNodeBsdfDiffuse')" >> .\import.txt
             "shaderMix=TreeNodes.nodes.new('ShaderNodeMixShader')" >> .\import.txt
             "shout=TreeNodes.nodes.new('ShaderNodeOutputMaterial')" >> .\import.txt
@@ -212,81 +214,80 @@ $matfile.Material.SubMaterials.Material | % {
 
 }
 
-$matcockpitfile.Material.SubMaterials.Material | % {
-    $matname = $_.Name
-    "$matname=bpy.data.materials.new('$matname')"  >> .\import.txt
-    "$matname.use_nodes=True" >> .\import.txt
-    "$matname.active_node_material" >> .\import.txt
-    "TreeNodes = $matname.node_tree" >> .\import.txt
-    "links = TreeNodes.links" >> .\import.txt
+# Commenting out cockpit file materials.  If you want the cockpit model, grab it with asset importer.
+#$matcockpitfile.Material.SubMaterials.Material | % {
+#    $matname = $_.Name
+#    "$matname=bpy.data.materials.new('$matname')"  >> .\import.txt
+#    "$matname.use_nodes=True" >> .\import.txt
+#    "$matname.active_node_material" >> .\import.txt
+#    "TreeNodes = $matname.node_tree" >> .\import.txt
+#    "links = TreeNodes.links" >> .\import.txt
 
-    "for n in TreeNodes.nodes:" >> .\import.txt
-    "    TreeNodes.nodes.remove(n)" >> .\import.txt
-    "" >> .\import.txt
-    $_.textures.Texture | % {
-        if ( $_.Map -eq "Diffuse") {
-            $matdiffuse = $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\")  #assumes diffuse is in slot 0
-            if ( $matdiffuse.contains("@") ) {  #fixes monitor materials where it assigns a file that doesn't exist
-                $matdiffuse = "$basedir\\libs\\UI\\HUD\\Screens\\Monitors\\killcount_i7.png"
-            }
-            "matDiffuse = bpy.data.images.load(filepath=`"$basedir\\$matdiffuse`")" >> .\import.txt
-            "shaderDiffuse=TreeNodes.nodes.new('ShaderNodeBsdfDiffuse')" >> .\import.txt
-            "shaderMix=TreeNodes.nodes.new('ShaderNodeMixShader')" >> .\import.txt
-            "shout=TreeNodes.nodes.new('ShaderNodeOutputMaterial')" >> .\import.txt
-            "shaderDiffImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
-            "shaderDiffImg.image=matDiffuse" >> .\import.txt
-            "shaderDiffuse.location = 100,500" >> .\import.txt
-            "shout.location = 500,400" >> .\import.txt
-            "shaderMix.location = 300,500" >> .\import.txt
-            "shaderDiffImg.location = -100,500" >> .\import.txt
-            "links.new(shaderDiffuse.outputs[0],shaderMix.inputs[1])" >> .\import.txt
-            "links.new(shaderMix.outputs[0],shout.inputs[0])" >> .\import.txt
-            "links.new(shaderDiffImg.outputs[0],shaderDiffuse.inputs[0])" >> .\import.txt
-            }
+#    "for n in TreeNodes.nodes:" >> .\import.txt
+#    "    TreeNodes.nodes.remove(n)" >> .\import.txt
+#    "" >> .\import.txt
+#    $_.textures.Texture | % {
+#        if ( $_.Map -eq "Diffuse") {
+#            $matdiffuse = $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\")  #assumes diffuse is in slot 0
+#            if ( $matdiffuse.contains("@") ) {  #fixes monitor materials where it assigns a file that doesn't exist
+#                $matdiffuse = "$basedir\\libs\\UI\\HUD\\Screens\\Monitors\\killcount_i7.png"
+#            }
+#            "matDiffuse = bpy.data.images.load(filepath=`"$basedir\\$matdiffuse`")" >> .\import.txt
+#            "shaderDiffuse=TreeNodes.nodes.new('ShaderNodeBsdfDiffuse')" >> .\import.txt
+#            "shaderMix=TreeNodes.nodes.new('ShaderNodeMixShader')" >> .\import.txt
+#            "shout=TreeNodes.nodes.new('ShaderNodeOutputMaterial')" >> .\import.txt
+#            "shaderDiffImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
+#            "shaderDiffImg.image=matDiffuse" >> .\import.txt
+#            "shaderDiffuse.location = 100,500" >> .\import.txt
+#            "shout.location = 500,400" >> .\import.txt
+#            "shaderMix.location = 300,500" >> .\import.txt
+#            "shaderDiffImg.location = -100,500" >> .\import.txt
+#            "links.new(shaderDiffuse.outputs[0],shaderMix.inputs[1])" >> .\import.txt
+#            "links.new(shaderMix.outputs[0],shout.inputs[0])" >> .\import.txt
+#            "links.new(shaderDiffImg.outputs[0],shaderDiffuse.inputs[0])" >> .\import.txt
+#            }
                         
-        if ($_.Map -eq "Specular") {
-            $matspec =  $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\") 
-            "matSpec=bpy.data.images.load(filepath=`"$basedir\\$matspec`")" >> .\import.txt
-            "shaderSpec=TreeNodes.nodes.new('ShaderNodeBsdfGlossy')" >> .\import.txt
-            "shaderSpecImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
-            "shaderSpecImg.image=matSpec" >> .\import.txt
-            "shaderSpec.location = 100,300" >> .\import.txt
-            "shaderSpecImg.location = -100,300" >> .\import.txt
-            "links.new(shaderSpec.outputs[0],shaderMix.inputs[2])" >> .\import.txt
-            "links.new(shaderSpecImg.outputs[0],shaderSpec.inputs[0])" >> .\import.txt
-            }   
+#        if ($_.Map -eq "Specular") {
+#            $matspec =  $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\") 
+#            "matSpec=bpy.data.images.load(filepath=`"$basedir\\$matspec`")" >> .\import.txt
+#            "shaderSpec=TreeNodes.nodes.new('ShaderNodeBsdfGlossy')" >> .\import.txt
+#            "shaderSpecImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
+#            "shaderSpecImg.image=matSpec" >> .\import.txt
+#            "shaderSpec.location = 100,300" >> .\import.txt
+#            "shaderSpecImg.location = -100,300" >> .\import.txt
+#            "links.new(shaderSpec.outputs[0],shaderMix.inputs[2])" >> .\import.txt
+#            "links.new(shaderSpecImg.outputs[0],shaderSpec.inputs[0])" >> .\import.txt
+#            }   
                     
-        if ($_.Map -eq "Bumpmap") {
-            $matnormal =  $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\") 
-            "matNormal=bpy.data.images.load(filepath=`"$basedir\\$matnormal`")" >> .\import.txt
-            "shaderNormalImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
-            "shaderRGBtoBW=TreeNodes.nodes.new('ShaderNodeRGBToBW')" >> .\import.txt
-            "shaderNormalImg.image=matNormal" >> .\import.txt
-            "shaderNormalImg.location = -100,100" >> .\import.txt
-            "shaderRGBtoBW.location = 100,100" >> .\import.txt
-            "links.new(shaderNormalImg.outputs[0],shaderRGBtoBW.inputs[0])" >> .\import.txt
-            "links.new(shaderRGBtoBW.outputs[0],shout.inputs[2])" >> .\import.txt
-        }
-    }
-}
+#        if ($_.Map -eq "Bumpmap") {
+#            $matnormal =  $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\") 
+#            "matNormal=bpy.data.images.load(filepath=`"$basedir\\$matnormal`")" >> .\import.txt
+#            "shaderNormalImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
+#            "shaderRGBtoBW=TreeNodes.nodes.new('ShaderNodeRGBToBW')" >> .\import.txt
+#            "shaderNormalImg.image=matNormal" >> .\import.txt
+#            "shaderNormalImg.location = -100,100" >> .\import.txt
+#            "shaderRGBtoBW.location = 100,100" >> .\import.txt
+#            "links.new(shaderNormalImg.outputs[0],shaderRGBtoBW.inputs[0])" >> .\import.txt
+#            "links.new(shaderRGBtoBW.outputs[0],shout.inputs[2])" >> .\import.txt
+#        }
+#    }
+#}
 
 #  *** PARSING Files ***
 #  Start parsing out $mechline
 $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
-	#TODO:  If you're reading a .cdf file here, it's recursive and you'll have to load in a few more files.  For now, just replace to .obj
-	#       for basic cockpit.
-    
+	# TODO: skip .cdf file  This is the cockpit, which needs to be done with asset importer.
+
 	$aname = $_.AName
 	$rotation = $_.Rotation
 	$position = $_.Position
 	$bonename = $_.BoneName.replace(" ","_")
 	$binding = $_.Binding
+	
 	if ($type -eq "Waveform") {
-		$binding = $binding.replace(".cdf",".obj")
 		$binding = $binding.replace(".cga",".obj")
 		$binding = $binding.replace(".cgf",".obj")
 	} else {
-		$binding = $binding.replace(".cdf",".dae")
 		$binding = $binding.replace(".cga",".dae")
 		$binding = $binding.replace(".cgf",".dae")
 	}
@@ -346,6 +347,7 @@ $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
     
 	# set new object as the active object
 	$parsedline += $scriptscene + "=bpy.data.objects[`"$objectname`"]"
+	$parsedline += "bpy.ops.object.parent_set(type='OBJECT')"                 # If there are any proxies or hardpoints, this will parent them to geometry.
 	# Parent the object to the Armature:  Assumes armature name is Armature and that it's been imported!
 	# $parsedline += $scriptscene + "=bpy.data.objects[`"Armature`"]"
 	# We may at this point (someday) to replace $objectname (above) with the $Aname, but for now let's stick with $objectname
@@ -353,7 +355,8 @@ $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
 	if (!$objectname.Contains("proxy") -and !$objectname.StartsWith("$" )) {
 		$parsedline += $scriptrotationmode 
 		$parsedline += $scriptrotation + "=[$rotation]"
-		$parsedline += $scripttransform + "(value=($position))"
+		#$parsedline += $scripttransform + "(value=($position))"
+		$parsedline += $scripttransform + " =[$position]"
 		# $parsedline += $scripttristoquads
 		# Create a vertex group with the bone name.  This makes parenting to armature super easy!
 		$parsedline += $scriptseteditmode
@@ -375,20 +378,20 @@ $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
 }
 
 if ($type -eq "Collada") {
-	# Parent all the objects to the armature.
-			#	"armature = bpy.data.objects['Armature']
-			#objects =  bpy.context.selectable_objects
-			#objects.remove(armature)
-			#for x in range(1, len(objects)):
-			#	objects[x].parent = objects[0]
-			#" >> .\import.txt # Send additional line feed.
-	#(type='ARMATURE_NAME')
-	"bpy.ops.object.select_all(action='SELECT')
-bpy.context.scene.objects.active = bpy.data.objects['Armature']
-bpy.ops.object.parent_set(type='ARMATURE', xmirror=False, keep_transform=True)
+	# Parent all the objects to the armature except empties. If you select an empty, it will start following the root and not its original parent.
+	#"bpy.ops.object.select_all(action='SELECT')
+"objects = bpy.data.objects
+for obj in objects:
+    if obj.type != 'EMPTY':
+        obj.select = True
+
+selected_objects = bpy.context.selected_objects
+armature = bpy.data.objects['Armature']
+selected_objects.remove(armature)
+bpy.context.scene.objects.active = armature
+bpy.ops.object.parent_set(type='ARMATURE_NAME', xmirror=False, keep_transform=True)
 " >> .\import.txt
 }
-
 
 # Set material mode. # iterate through areas in current screen
 "for area in bpy.context.screen.areas:
