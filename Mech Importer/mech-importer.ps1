@@ -151,10 +151,10 @@ if ($type -eq "Collada") {
 
 # Get the 4 materials from $matfile and create them in Blender
 #  material append wants an object of type material, not a string.  Will have to generate that.
-# Since we can't really generate a node layout at this time, we're just going to open the image files
-# so it's easier for the user to generate.
 $matfile.Material.SubMaterials.Material | % {
     $matname = $_.Name   # $matname is the name of the material
+    Write-host "Found Material $matname" -ForegroundColor Green
+
     "$matname=bpy.data.materials.new('$matname')"  >> .\import.txt
     "$matname.use_nodes=True" >> .\import.txt
     #"bpy.context.object.active_material_index = 0" >> .\import.txt
@@ -162,116 +162,82 @@ $matfile.Material.SubMaterials.Material | % {
     "TreeNodes = $matname.node_tree" >> .\import.txt
     "links = TreeNodes.links" >> .\import.txt
 
-    "for n in TreeNodes.nodes:" >> .\import.txt
-    "    TreeNodes.nodes.remove(n)" >> .\import.txt
-    "" >> .\import.txt
+"for n in TreeNodes.nodes:
+   TreeNodes.nodes.remove(n)
+" >> .\import.txt
+	
+	# Every material will have a PrincipleBSDF and Material output.  Add, place and link those
+"shaderPrincipledBSDF = TreeNodes.nodes.new('ShaderNodeBsdfPrincipled')
+shaderPrincipledBSDF.location =  300,500
+shout=TreeNodes.nodes.new('ShaderNodeOutputMaterial')
+shout.location = 500,500
+links.new(shaderPrincipledBSDF.outputs[0], shout.inputs[0])
+" >> .\import.txt
 
-    Write-host "Found Material $matname" -ForegroundColor Green
     $_.textures.Texture | % {
         if ( $_.Map -eq "Diffuse") {
+			#Diffuse Material
             $matdiffuse = $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\")  #assumes diffuse is in slot 0
-            "matDiffuse = bpy.data.images.load(filepath=`"$basedir\\$matdiffuse`")" >> .\import.txt
-			"shaderPrincipleBSDF = TreeNodes.nodes.new('ShaderNodeBsdfPrincipled')" > .\import.txt
-            "shaderDiffuse=TreeNodes.nodes.new('ShaderNodeBsdfDiffuse')" >> .\import.txt
-            "shaderMix=TreeNodes.nodes.new('ShaderNodeMixShader')" >> .\import.txt
-            "shout=TreeNodes.nodes.new('ShaderNodeOutputMaterial')" >> .\import.txt
-            "shaderDiffImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
-            "shaderDiffImg.image=matDiffuse" >> .\import.txt
-            "shaderDiffuse.location = 100,500" >> .\import.txt
-            "shout.location = 500,400" >> .\import.txt
-            "shaderMix.location = 300,500" >> .\import.txt
-            "shaderDiffImg.location = -100,500" >> .\import.txt
-            "links.new(shaderDiffuse.outputs[0],shaderMix.inputs[1])" >> .\import.txt
-            "links.new(shaderMix.outputs[0],shout.inputs[0])" >> .\import.txt
-            "links.new(shaderDiffImg.outputs[0],shaderDiffuse.inputs[0])" >> .\import.txt
+"matDiffuse = bpy.data.images.load(filepath=`"$basedir\\$matdiffuse`", check_existing=True)
+shaderDiffImg=TreeNodes.nodes.new('ShaderNodeTexImage')
+shaderDiffImg.image=matDiffuse
+shaderDiffImg.location = 0,600
+links.new(shaderDiffImg.outputs[0], shaderPrincipledBSDF.inputs[0])
+#links.new(shaderDiffImg.outputs[1], shaderPrincipledBSDF.inputs[15])         # Not quite right.
+" >> .\import.txt
             }
                         
         if ($_.Map -eq "Specular") {
+			# Specular
             $matspec =  $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\") 
-            "matSpec=bpy.data.images.load(filepath=`"$basedir\\$matspec`")" >> .\import.txt
-            "shaderSpec=TreeNodes.nodes.new('ShaderNodeBsdfGlossy')" >> .\import.txt
-            "shaderSpecImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
-            "shaderSpecImg.image=matSpec" >> .\import.txt
-            "shaderSpec.location = 100,300" >> .\import.txt
-            "shaderSpecImg.location = -100,300" >> .\import.txt
-            "links.new(shaderSpec.outputs[0],shaderMix.inputs[2])" >> .\import.txt
-            "links.new(shaderSpecImg.outputs[0],shaderSpec.inputs[0])" >> .\import.txt
+"matSpec=bpy.data.images.load(filepath='$basedir\\$matspec', check_existing=True)
+shaderSpecImg=TreeNodes.nodes.new('ShaderNodeTexImage')
+shaderSpecImg.color_space = 'NONE'
+shaderSpecImg.image=matSpec
+shaderSpecImg.location = 0,325
+links.new(shaderSpecImg.outputs[0], shaderPrincipledBSDF.inputs[5])
+" >> .\import.txt
             }   
                     
         if ($_.Map -eq "Bumpmap") {
+			# Normal
             $matnormal =  $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\") 
-            "matNormal=bpy.data.images.load(filepath=`"$basedir\\$matnormal`")" >> .\import.txt
-            "shaderNormalImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
-            "shaderRGBtoBW=TreeNodes.nodes.new('ShaderNodeRGBToBW')" >> .\import.txt
-            "shaderNormalImg.image=matNormal" >> .\import.txt
-            "shaderNormalImg.location = -100,100" >> .\import.txt
-            "shaderRGBtoBW.location = 100,100" >> .\import.txt
-            "links.new(shaderNormalImg.outputs[0],shaderRGBtoBW.inputs[0])" >> .\import.txt
-            "links.new(shaderRGBtoBW.outputs[0],shout.inputs[2])" >> .\import.txt
-        }
+"matNormal=bpy.data.images.load(filepath=`"$basedir\\$matnormal`", check_existing=True)
+shaderNormalImg=TreeNodes.nodes.new('ShaderNodeTexImage')
+shaderNormalImg.color_space = 'NONE'
+shaderNormalImg.image=matNormal
+shaderNormalImg.location = -100,0
+converterNormalMap=TreeNodes.nodes.new('ShaderNodeNormalMap')
+converterNormalMap.location = 100,0
+links.new(shaderNormalImg.outputs[0], converterNormalMap.inputs[1])
+links.new(converterNormalMap.outputs[0], shaderPrincipledBSDF.inputs[17])
+
+" >> .\import.txt
+			}
+
+			# If you need Camo patterns, use the MWO_CAMO3 blend file and replace the materials with it.
+#		if ($_.Map -eq "SubSurface") {
+#			# Camo pattern.  Will need to split the 3 color channels and then recombine.
+#			$matCamo =   $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\") 
+#"
+#matCamo=bpy.data.images.load(filepath='$basedir\\$matCamo', check_existing=True)
+#shaderCamoImg=TreeNodes.nodes.new('ShaderNodeTexImage')
+#shaderCamoImg.location=-700, 400
+#shaderCamoImg.image=matCamo
+#rgbSplitter=TreeNodes.nodes.new('ShaderNodeSeparateRGB')
+#rgbSplitter.location = -525,400
+#link.new(shaderCamoImg.outputs[0], rgbSplitter.inputs[0])
+#red=TreeNodes.nodes.new('')
+#blue=TreeNodes.nodes.new('')
+#green=TreeNodes.nodes.new('')
+
+#"
+#>> .\import.txt
+#			}
     }
 	# Get each material into a material object.
 
 }
-
-# Commenting out cockpit file materials.  If you want the cockpit model, grab it with asset importer.
-#$matcockpitfile.Material.SubMaterials.Material | % {
-#    $matname = $_.Name
-#    "$matname=bpy.data.materials.new('$matname')"  >> .\import.txt
-#    "$matname.use_nodes=True" >> .\import.txt
-#    "$matname.active_node_material" >> .\import.txt
-#    "TreeNodes = $matname.node_tree" >> .\import.txt
-#    "links = TreeNodes.links" >> .\import.txt
-
-#    "for n in TreeNodes.nodes:" >> .\import.txt
-#    "    TreeNodes.nodes.remove(n)" >> .\import.txt
-#    "" >> .\import.txt
-#    $_.textures.Texture | % {
-#        if ( $_.Map -eq "Diffuse") {
-#            $matdiffuse = $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\")  #assumes diffuse is in slot 0
-#            if ( $matdiffuse.contains("@") ) {  #fixes monitor materials where it assigns a file that doesn't exist
-#                $matdiffuse = "$basedir\\libs\\UI\\HUD\\Screens\\Monitors\\killcount_i7.png"
-#            }
-#            "matDiffuse = bpy.data.images.load(filepath=`"$basedir\\$matdiffuse`")" >> .\import.txt
-#            "shaderDiffuse=TreeNodes.nodes.new('ShaderNodeBsdfDiffuse')" >> .\import.txt
-#            "shaderMix=TreeNodes.nodes.new('ShaderNodeMixShader')" >> .\import.txt
-#            "shout=TreeNodes.nodes.new('ShaderNodeOutputMaterial')" >> .\import.txt
-#            "shaderDiffImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
-#            "shaderDiffImg.image=matDiffuse" >> .\import.txt
-#            "shaderDiffuse.location = 100,500" >> .\import.txt
-#            "shout.location = 500,400" >> .\import.txt
-#            "shaderMix.location = 300,500" >> .\import.txt
-#            "shaderDiffImg.location = -100,500" >> .\import.txt
-#            "links.new(shaderDiffuse.outputs[0],shaderMix.inputs[1])" >> .\import.txt
-#            "links.new(shaderMix.outputs[0],shout.inputs[0])" >> .\import.txt
-#            "links.new(shaderDiffImg.outputs[0],shaderDiffuse.inputs[0])" >> .\import.txt
-#            }
-                        
-#        if ($_.Map -eq "Specular") {
-#            $matspec =  $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\") 
-#            "matSpec=bpy.data.images.load(filepath=`"$basedir\\$matspec`")" >> .\import.txt
-#            "shaderSpec=TreeNodes.nodes.new('ShaderNodeBsdfGlossy')" >> .\import.txt
-#            "shaderSpecImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
-#            "shaderSpecImg.image=matSpec" >> .\import.txt
-#            "shaderSpec.location = 100,300" >> .\import.txt
-#            "shaderSpecImg.location = -100,300" >> .\import.txt
-#            "links.new(shaderSpec.outputs[0],shaderMix.inputs[2])" >> .\import.txt
-#            "links.new(shaderSpecImg.outputs[0],shaderSpec.inputs[0])" >> .\import.txt
-#            }   
-                    
-#        if ($_.Map -eq "Bumpmap") {
-#            $matnormal =  $_.file.replace(".tif","$imageformat").replace(".dds","$imageformat").replace("/","\\") 
-#            "matNormal=bpy.data.images.load(filepath=`"$basedir\\$matnormal`")" >> .\import.txt
-#            "shaderNormalImg=TreeNodes.nodes.new('ShaderNodeTexImage')" >> .\import.txt
-#            "shaderRGBtoBW=TreeNodes.nodes.new('ShaderNodeRGBToBW')" >> .\import.txt
-#            "shaderNormalImg.image=matNormal" >> .\import.txt
-#            "shaderNormalImg.location = -100,100" >> .\import.txt
-#            "shaderRGBtoBW.location = 100,100" >> .\import.txt
-#            "links.new(shaderNormalImg.outputs[0],shaderRGBtoBW.inputs[0])" >> .\import.txt
-#            "links.new(shaderRGBtoBW.outputs[0],shout.inputs[2])" >> .\import.txt
-#        }
-#    }
-#}
 
 #  *** PARSING Files ***
 #  Start parsing out $mechline
