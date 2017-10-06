@@ -46,7 +46,6 @@ foreach ($arg in $args) {
 	}
 }
 
-
 $basedir = "d:\blender projects\mechs"  # this is where you extracted all the *.pak files from the game. \objects, \textures etc
                                         # will be under this dir
 $imageformat = ".dds"                   # Default image file format.  If you want to use .pngs, change this (although you probably don't want to.
@@ -71,6 +70,9 @@ $scriptseteditmode = "bpy.ops.object.mode_set(mode = `"EDIT`")"
 $scriptsetobjectmode = "bpy.ops.object.mode_set(mode = `"OBJECT`")"
 #$scriptclearmaterial = "bpy.context.object.data.materials.pop(0, update_data=True)"
 $scriptclearmaterial = "bpy.context.object.data.materials.clear(update_data=True)"   #only works with 2.69 or newer. Bug fix 1.61:  added update_data
+
+"# Mech Importer 2.0" >> .\import.py
+"#" >> .\import.py
 
 # if no argument is found, try to find the cdf file in the current directory.
 $directory = (Get-ChildItem).directory[0].name  # $directory should have the name of the mech
@@ -124,10 +126,6 @@ write-host "Mech is $mech"
 [xml]$cdffile = get-content $cdffilelocation
 
 # Get $modeldir from XML file.  Path to everything will be $basedir\$modeldir
-#$modeldir = $cdffile.Characterdefinition.Model.Material
-#$modeldir = $modeldir.replace("/","\\")
-#$modeldir = $modeldir.Trimend("$mech")
-# Above logic doesn't work, because .cdf file isn't consistent among models.  However, modeldir is always objects\mechs\<mechname>
 $modeldir = "\\objects\\mechs\\$mech"
 
 Write-Host "Modeldir is $modeldir"
@@ -137,7 +135,6 @@ Write-Host "Modeldir is $modeldir"
 # Assumptions:  The .cdf file we read has the name of the mech in it, and the mtl file is <mech>_body.mtl under the body subdirectory.
 #               For the cockpit, the mtl file is <mech>_a_cockpit_standard, and under the cockpit_standard subdir.
 [xml]$matfile = get-content ("$basedir\$modeldir\body\$mech" + "_body.mtl")
-[xml]$matcockpitfile = Get-Content ("$basedir\$modeldir\cockpit_standard\$mech" + "_a_cockpit_standard.mtl")
 
 # Set Blender to Cycles
 "bpy.context.scene.render.engine = 'CYCLES'" >> .\import.txt
@@ -157,7 +154,6 @@ $matfile.Material.SubMaterials.Material | % {
 
     "$matname=bpy.data.materials.new('$matname')"  >> .\import.txt
     "$matname.use_nodes=True" >> .\import.txt
-    #"bpy.context.object.active_material_index = 0" >> .\import.txt
     "$matname.active_node_material" >> .\import.txt
     "TreeNodes = $matname.node_tree" >> .\import.txt
     "links = TreeNodes.links" >> .\import.txt
