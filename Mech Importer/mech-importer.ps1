@@ -8,24 +8,48 @@
 # version 1.5 (6/12/14) - Modified to work with the new Clan mech files
 # version 1.6 (12/30/14) - Fixing bugs with Wave 2 mechs, variant/window materials assigned, general cleanup
 # Version 1.61 (8/9/15)  - Bug fixes (Blender 2.73+ crash, atlas_movie.cdf issue)
-# Version 2.0 (9/30/17) - Supports Collada files created by the 1.0 version of cgf-converter (https://www.heffaypresents.com/GitHub)
+# Version 2.0 (10/06/17) - Supports Collada files created by the 1.0 version of cgf-converter (https://www.heffaypresents.com/GitHub)
 
 # Input is the .cdf file in the mech directory for the mech you want
 # output is the text of what you want to put into Blender.  It also outputs to import.txt in the directory you
 # run the script from.
 
+param (
+    [string]$cdffile,                     # location of the mech's .cdf file.  Usually at Objects\Mechs\<mech>.  If running from a directory other than this, can set it here.
+	[string]$objectdir,              # Where the game .pak files are extracted to.
+	[switch]$dae = $true,                 # Defaults to Collada.  If cgf-exporter gets more exporters, there will be more options for this.
+	[switch]$obj = $false,
+	[string]$imageformat = "dds"          # Default image file format.  If you want to use .pngs, change this (although you probably don't want to.
+)
+
+# Python commands used by Blender
+$scriptimport = "bpy.ops.import_scene.obj"
+$scriptimportCollada = "bpy.ops.wm.collada_import"
+$scriptscene = "bpy.context.scene.objects.active"
+$scriptrotationmode = "bpy.context.active_object.rotation_mode='QUATERNION'"
+$scriptrotation = "bpy.context.active_object.rotation_quaternion"
+#$scripttransform = "bpy.ops.transform.translate"
+$scripttransform = "bpy.context.active_object.location"
+$scriptremovedoubles = "bpy.ops.mesh.remove_doubles()"
+$scripttristoquads = "bpy.ops.mesh.tris_convert_to_quads()"
+$scriptseteditmode = "bpy.ops.object.mode_set(mode='EDIT')"
+$scriptsetobjectmode = "bpy.ops.object.mode_set(mode='OBJECT')"
+#$scriptclearmaterial = "bpy.context.object.data.materials.pop(0, update_data=True)"
+$scriptclearmaterial = "bpy.context.object.data.materials.clear(update_data=True)"   #only works with 2.69 or newer. Bug fix 1.61:  added update_data
+
 function Get-Usage {
-    Write-host "Usage:  mech-importer <mech .cdf file> [-obj] [-objectdir `"<directory to \Object>`"]" -ForegroundColor Yellow
+    Write-host "Usage:  mech-importer <-cdffile <mech .cdf file location>><[-objectdir '<directory to \Object>']> <[-dae|-obj]> <-imageformat [dds]|[tif]>" -ForegroundColor Green
 	Write-Host "        Takes a mech's cdf file (in Objects\Mechs\<mech>) and creates an import.txt file that"
 	Write-Host "        can be pasted into the Blender python console.  This will import all the mech parts"
 	Write-Host "        (assuming they've been converted to .dae or .obj) into Blender and create the appropriate"
 	Write-Host "        materials.\n"
 	Write-Host
-    Write-Host "        If .cdf file isn't specified, Mech Importer checks the current directory"
-    Write-Host "        Please update the script before running.  The following variables need to be properly defined:"
-    Write-Host "             `$basedir:  Where you extracted the object.pak files (and skins)"
-    Write-Host "             `$imageformat:  What image format you are using (default .dds)"
+    Write-Host "        If .cdf file isn't specified, Mech Importer checks the current directory."
+    Write-Host "        The following variables need to be properly defined:"
+    Write-Host "             `$objectdir:  Where you extracted the object.pak files (and skins)"
+    Write-Host "             `$imageformat:  What image format you are using (default .dds.  Also supports tif)"
     Write-Host
+	Write-Host "         This will only fully work when imported into Blender 2.79 or newer, as it uses the PrincipledBSDF shader."
     pause
     exit
 }
@@ -37,77 +61,66 @@ if ($PSVersionTable.PSVersion.Major -lt 3) {
 }
 #
 
+# Argument processing and cleanup
 # $type determines if you're using Collada or Waveform files.  Defaults to Collada.
 $type = "Collada"
-#$allArgs = $PSBoundParameters
-foreach ($arg in $args) {
-	if ($arg -eq "-obj") {
-		$type = "Waveform"
+if (!$dae -and $obj) {
+	$type = "Waveform"
+} 
+
+if (!$objectdir) {
+	Write-Host "No -objectdir specified.  Will default to d:\blender projects\mechs\.  THIS IS PROBABLY NOT WHAT YOU WANT." -ForegroundColor Yellow
+	$basedir = "d:\blender projects\mechs\"    # this is where you extracted all the *.pak files from the game. \objects, \textures etc.  This is my settings
+} 
+else {
+	$basedir = $objectdir
+	if (!$basedir.EndsWith('\')) {
+		$basedir += '\'
 	}
 }
-
-$basedir = "d:\blender projects\mechs"  # this is where you extracted all the *.pak files from the game. \objects, \textures etc
-                                        # will be under this dir
-$imageformat = ".dds"                   # Default image file format.  If you want to use .pngs, change this (although you probably don't want to.
-
 # convert the path so it can be used by Blender
 $basedir = $basedir.replace("\","\\")
+
+if ($imageformat -eq "tif" -or $imageformat -eq ".tif") {
+	$imageformat = ".tif"                   
+}
+else {
+	$imageformat = ".dds"
+}
 
 # Set the weapons variable to assign variant materials.  Hero, invasion, blanks and Phoenix parts are variants.
 $weapons = "hero","missile","narc","uac","ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx","laser","ams","phoenix","blank","invasion"
 
-# Python commands used by Blender
-$scriptimport = "bpy.ops.import_scene.obj"
-$scriptimportCollada = "bpy.ops.wm.collada_import"
-$scriptscene = "bpy.context.scene.objects.active"
-$scriptrotationmode = "bpy.context.active_object.rotation_mode=`"QUATERNION`""
-$scriptrotation = "bpy.context.active_object.rotation_quaternion"
-#$scripttransform = "bpy.ops.transform.translate"
-$scripttransform = "bpy.context.active_object.location"
-$scriptremovedoubles = "bpy.ops.mesh.remove_doubles()"
-$scripttristoquads = "bpy.ops.mesh.tris_convert_to_quads()"
-$scriptseteditmode = "bpy.ops.object.mode_set(mode = `"EDIT`")"
-$scriptsetobjectmode = "bpy.ops.object.mode_set(mode = `"OBJECT`")"
-#$scriptclearmaterial = "bpy.context.object.data.materials.pop(0, update_data=True)"
-$scriptclearmaterial = "bpy.context.object.data.materials.clear(update_data=True)"   #only works with 2.69 or newer. Bug fix 1.61:  added update_data
-
-"# Mech Importer 2.0" >> .\import.py
-"#" >> .\import.py
-
-# if no argument is found, try to find the cdf file in the current directory.
-$directory = (Get-ChildItem).directory[0].name  # $directory should have the name of the mech
-write-host "Directory set to $directory"
-
-#Find the mech.cdf file.  If it's not supplied as the argument, check the current directory.
-if ( $args[0] ) {  # argument passed.  See if it's the cdf file.
-    if ( (test-path $args[0]) -and ($args[0].contains("cdf"))) {
-        $cdffilelocation = get-childitem $args[0]
-    } else {
-        Get-Usage
-        exit
-    }
-} # no args entered.  Check current directory.
-if ( (get-childitem *.cdf)) {
-    #$cdffilelocation = Get-childitem *.cdf   # Doesn't work if there is more than one .cdf file (looking at you Atlas)
-	foreach ($file in (Get-ChildItem *.cdf)) {
-		if (!$file.Name.Contains("movie")) {
-			$cdffilelocation = $file;
+#Find the <mech>.cdf file.  If it's not supplied as the argument, check the current directory.
+if (!$cdffile) {
+	# no cdf file specified.  Check the local directory.
+	if (get-childitem *.cdf) {
+		#$cdffilelocation = Get-childitem *.cdf   # Doesn't work if there is more than one .cdf file (looking at you Atlas)
+		foreach ($file in (Get-ChildItem *.cdf)) {
+			if (!$file.Name.Contains("movie")) {
+				$cdffilelocation = $file;
+			}
 		}
+	} 
+	else {            # unable to find a cdf file in current directory.
+		Write-Host "Unable to find a cdf file in current directory, and no -cdffile specified." -ForegroundColor Red
+		Get-Usage
+		exit
 	}
-} else {
-    write-host "Unable to find .cdf file." -ForegroundColor Red
-    Get-Usage
-    exit
-}
-
-if ( !(test-path $cdffilelocation)) {
-	write-host "Unable to find .cdf file" -ForegroundColor Red
-	exit
+} 
+else { # cdffile passed.  Check to see if the file exists.
+	if ( !(test-path $cdffile -ErrorAction SilentlyContinue)) {
+		write-host "Unable to find .cdf file: $cdffile" -ForegroundColor Red
+		exit
+	}
+	else {
+		$cdffilelocation = $cdffile
+	}
 }
 
 # Delete import.txt if it already exists.
 try {
-	$importtxt = Get-ChildItem "import.txt"
+	$importtxt = Get-ChildItem "import.txt" -ErrorAction SilentlyContinue
 	Remove-Item $importtxt
 }
 catch  {
@@ -115,7 +128,11 @@ catch  {
 	Write-Host "No existing import.txt file found. (this is ok)"
 }
 
-# Get mech name from .cdf file name
+"# Mech Importer 2.0
+# https://www.heffaypresents.com/GitHub
+" >> .\import.txt
+
+# Get mech name from .cdf directory name
 $mech = $cdffilelocation.directory.Name
 #$mech = $args[0].ToString().Substring(0,($args[0].tostring().Length-4))
 if ($mech.startswith(".\")) {   # Need to strip off the .\
