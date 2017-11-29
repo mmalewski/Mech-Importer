@@ -9,6 +9,7 @@
 # version 1.6 (12/30/14) - Fixing bugs with Wave 2 mechs, variant/window materials assigned, general cleanup
 # Version 1.61 (8/9/15)  - Bug fixes (Blender 2.73+ crash, atlas_movie.cdf issue)
 # Version 2.0 (10/06/17) - Supports Collada files created by the 1.0 version of cgf-converter (https://www.heffaypresents.com/GitHub)
+# Version 2.0.1 (11/26/17) - Layer management, bug fixes
 
 # Input is the .cdf file in the mech directory for the mech you want
 # output is the text of what you want to put into Blender.  It also outputs to import.txt in the directory you
@@ -16,7 +17,7 @@
 
 param (
     [string]$cdffile,                     # location of the mech's .cdf file.  Usually at Objects\Mechs\<mech>.  If running from a directory other than this, can set it here.
-	[string]$objectdir,              # Where the game .pak files are extracted to.
+	[string]$objectdir,                   # Where the game .pak files are extracted to.
 	[switch]$dae = $true,                 # Defaults to Collada.  If cgf-exporter gets more exporters, there will be more options for this.
 	[switch]$obj = $false,
 	[string]$imageformat = "dds"          # Default image file format.  If you want to use .pngs, change this (although you probably don't want to.
@@ -28,13 +29,11 @@ $scriptimportCollada = "bpy.ops.wm.collada_import"
 $scriptscene = "bpy.context.scene.objects.active"
 $scriptrotationmode = "bpy.context.active_object.rotation_mode='QUATERNION'"
 $scriptrotation = "bpy.context.active_object.rotation_quaternion"
-#$scripttransform = "bpy.ops.transform.translate"
 $scripttransform = "bpy.context.active_object.location"
 $scriptremovedoubles = "bpy.ops.mesh.remove_doubles()"
 $scripttristoquads = "bpy.ops.mesh.tris_convert_to_quads()"
 $scriptseteditmode = "bpy.ops.object.mode_set(mode='EDIT')"
 $scriptsetobjectmode = "bpy.ops.object.mode_set(mode='OBJECT')"
-#$scriptclearmaterial = "bpy.context.object.data.materials.pop(0, update_data=True)"
 $scriptclearmaterial = "bpy.context.object.data.materials.clear(update_data=True)"   #only works with 2.69 or newer. Bug fix 1.61:  added update_data
 
 function Get-Usage {
@@ -69,8 +68,8 @@ if (!$dae -and $obj) {
 } 
 
 if (!$objectdir) {
-	Write-Host "No -objectdir specified.  Will default to d:\blender projects\mechs\.  THIS IS PROBABLY NOT WHAT YOU WANT." -ForegroundColor Yellow
 	$basedir = "d:\blender projects\mechs\"    # this is where you extracted all the *.pak files from the game. \objects, \textures etc.  This is my settings
+	Write-Host "No -objectdir specified.  Will default to $basedir.  THIS IS PROBABLY NOT WHAT YOU WANT." -ForegroundColor Yellow
 } 
 else {
 	$basedir = $objectdir
@@ -78,8 +77,19 @@ else {
 		$basedir += '\'
 	}
 }
+
 # convert the path so it can be used by Blender
 $basedir = $basedir.replace("\","\\")
+
+# Delete import.txt if it already exists.
+try {
+	$importtxt = Get-ChildItem "import.txt" -ErrorAction SilentlyContinue
+	Remove-Item $importtxt
+}
+catch  {
+	# File not found.
+	Write-Host "No existing import.txt file found. (this is ok)"
+}
 
 if ($imageformat -eq "tif" -or $imageformat -eq ".tif") {
 	$imageformat = ".tif"                   
@@ -89,7 +99,7 @@ else {
 }
 
 # Set the weapons variable to assign variant materials.  Hero, invasion, blanks and Phoenix parts are variants.
-$weapons = "hero","missile","narc","uac","ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx","laser","ams","phoenix","blank","invasion"
+$weapons = "hero","missile","narc","uac", "uac2", "uac5", "uac10", "uac20", "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx","laser","ams","phoenix","blank","invasion"
 
 #Find the <mech>.cdf file.  If it's not supplied as the argument, check the current directory.
 if (!$cdffile) {
@@ -118,19 +128,17 @@ else { # cdffile passed.  Check to see if the file exists.
 	}
 }
 
-# Delete import.txt if it already exists.
-try {
-	$importtxt = Get-ChildItem "import.txt" -ErrorAction SilentlyContinue
-	Remove-Item $importtxt
-}
-catch  {
-	# File not found.
-	Write-Host "No existing import.txt file found. (this is ok)"
-}
-
 "# Mech Importer 2.0
 # https://www.heffaypresents.com/GitHub
+
+import bpy
+import bmesh
+import math
+import mathutils
 " >> .\import.txt
+
+# Set Blender to Cycles
+"bpy.context.scene.render.engine = 'CYCLES'" >> .\import.txt
 
 # Get mech name from .cdf directory name
 $mech = $cdffilelocation.directory.Name
@@ -150,11 +158,7 @@ Write-Host "Modeldir is $modeldir"
 # *** MATERIALS ***
 # Load up materials from the <mech_body.mtl> file
 # Assumptions:  The .cdf file we read has the name of the mech in it, and the mtl file is <mech>_body.mtl under the body subdirectory.
-#               For the cockpit, the mtl file is <mech>_a_cockpit_standard, and under the cockpit_standard subdir.
 [xml]$matfile = get-content ("$basedir\$modeldir\body\$mech" + "_body.mtl")
-
-# Set Blender to Cycles
-"bpy.context.scene.render.engine = 'CYCLES'" >> .\import.txt
 
 # If this is a Collada file, add the Armature
 if ($type -eq "Collada") {
@@ -224,6 +228,8 @@ converterNormalMap=TreeNodes.nodes.new('ShaderNodeNormalMap')
 converterNormalMap.location = 100,0
 links.new(shaderNormalImg.outputs[0], converterNormalMap.inputs[1])
 links.new(converterNormalMap.outputs[0], shaderPrincipledBSDF.inputs[17])
+
+### END Material:  $matname
 
 " >> .\import.txt
 			}
@@ -301,7 +307,6 @@ $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
        
 		$material = $material.replace("\","\\").replace("/","\\")  # v1.6 bugfix:  Adds replace("\","\\") so materials get assigned properly
 	}
-	#write-host "Matname for $objectname is $matname"
 
 	# Time to generate the commands (in $parsedline, an array)
 	$parsedline = @()
@@ -346,12 +351,11 @@ $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
 		$parsedline += "bpy.ops.mesh.select_all(action=`'TOGGLE`')"
 
 		$parsedline += $scriptsetobjectmode
-		$parsedline += $scriptclearmaterial                     # Not sure if I want to do this or not.  Might wipe the BI materials from the .mtl file.
+		#$parsedline += $scriptclearmaterial                     # Not sure if I want to do this or not.  Might wipe the BI materials from the .mtl file.
 		$parsedline += "bpy.context.object.data.materials.append($matname)"
 	}
 
 	foreach ( $line in $parsedline ) {
-		#write-host $line
 		$line >> .\import.txt
 	}
 }
@@ -361,16 +365,153 @@ if ($type -eq "Collada") {
 	#"bpy.ops.object.select_all(action='SELECT')
 "objects = bpy.data.objects
 for obj in objects:
-    if obj.type != 'EMPTY':
+    if obj.type != 'EMPTY' and obj.name != 'Lamp' and obj.name != 'Camera' and obj.name != 'Cube':
         obj.select = True
 
 selected_objects = bpy.context.selected_objects
 armature = bpy.data.objects['Armature']
+amt=armature.data
+armature.show_x_ray = True
+armature.data.show_axes = True
+armature.data.draw_type = 'BBONE'
 selected_objects.remove(armature)
 bpy.context.scene.objects.active = armature
 bpy.ops.object.parent_set(type='ARMATURE_NAME', xmirror=False, keep_transform=True)
 " >> .\import.txt
 }
+
+# Create IK Bones.  Need to identify all the bones that will have IKs applied to.
+# Create the custom shapes on layer 11.  Place the bones using the custom shapes, 
+# then 
+"bpy.ops.object.mode_set(mode='EDIT')
+
+# Bone Shapes.  Sphere for IK targets, cube for foot/hand/torso
+bm = bmesh.new()
+bmesh.ops.create_cube(bm, size=1.5, calc_uvs=False)
+me = bpy.data.meshes.new('Mesh')
+bm.to_mesh(me)
+bm.free()
+bone_shape_cube = bpy.data.objects.new('bone_shape_cube', me)
+bone_shape_cube.draw_type = 'WIRE'
+bpy.context.scene.objects.link(bone_shape_cube)
+bone_shape_cube.layers = [False]*19+[True]
+
+bm = bmesh.new()
+bmesh.ops.create_icosphere(bm, subdivisions=0, diameter=1.0, calc_uvs=False)
+me = bpy.data.meshes.new('Mesh')
+bm.to_mesh(me)
+bm.free()
+bone_shape_sphere = bpy.data.objects.new('bone_shape_sphere', me)
+bone_shape_sphere.draw_type = 'WIRE'
+bpy.context.scene.objects.link(bone_shape_sphere)
+bone_shape_sphere.layers = [False]*19+[True]
+
+bpy.ops.object.mode_set(mode='EDIT')
+rightThigh = bpy.context.object.data.edit_bones['Bip01_R_Thigh']
+rightCalf = bpy.context.object.data.edit_bones['Bip01_R_Calf']
+leftThigh = bpy.context.object.data.edit_bones['Bip01_L_Thigh']
+leftCalf = bpy.context.object.data.edit_bones['Bip01_L_Calf']
+leftElbow = bpy.context.object.data.edit_bones['Bip01_L_UpperArm']
+leftForearm = bpy.context.object.data.edit_bones['Bip01_L_Forearm']
+rightElbow = bpy.context.object.data.edit_bones['Bip01_R_UpperArm']
+rightForearm = bpy.context.object.data.edit_bones['Bip01_R_Forearm']
+rightHand = bpy.context.object.data.edit_bones['Bip01_R_Hand']
+leftHand = bpy.context.object.data.edit_bones['Bip01_L_Hand'] 
+
+### Create IK bones
+# Right foot
+rightFootIK = amt.edit_bones.new('Foot_IK.R')
+rightFootIK.head = rightCalf.tail
+rightFootIK.tail = rightCalf.tail + Vector((0,1,0))
+rightFootIK.use_deform = False
+
+# Right knee
+rightKneeIK = amt.edit_bones.new('Knee_IK.R')
+rightKneeIK.head = rightCalf.head + Vector((0,-4,0))
+rightKneeIK.tail = rightKneeIK.head + Vector ((0,-1,0))
+rightKneeIK.use_deform = False
+
+# Left foot
+leftFootIK = amt.edit_bones.new('Foot_IK.L')
+leftFootIK.head = leftCalf.tail
+leftFootIK.tail = leftCalf.tail + Vector((0,1,0))
+leftFootIK.use_deform = False
+
+# Left knee
+leftKneeIK = amt.edit_bones.new('Knee_IK.L')
+leftKneeIK.head = leftCalf.head + Vector((0,-4,0))
+leftKneeIK.tail = leftKneeIK.head + Vector((0,-1,0))
+leftKneeIK.use_deform = False
+
+# Right Hand
+rightHandIK = amt.edit_bones.new('Hand_IK.R')
+rightHandIK.head = rightHand.head
+rightHandIK.tail = rightHandIK.head + Vector((0, 1, 1))
+rightHandIK.use_deform = False
+
+# Right Elbow
+rightElbowIK = amt.edit_bones.new('Elbow_IK.R')
+rightElbowIK.head = rightForearm.head + Vector((0, -4, 0))
+rightElbowIK.tail = rightElbowIK.head + Vector((0, -1, 0))
+rightElbowIK.use_deform = False
+
+# Left Hand
+leftHandIK = amt.edit_bones.new('Hand_IK.L')
+leftHandIK.head = leftHand.head
+leftHandIK.tail = leftHandIK.head + Vector((0, 1, 1))
+leftHandIK.use_deform = False
+
+# Left Elbow
+leftElbowIK = amt.edit_bones.new('Elbow_IK.L')
+leftElbowIK.head = leftForearm.head + Vector((0, -4, 0))
+leftElbowIK.tail = leftElbowIK.head + Vector((0, -1, 0))
+leftElbowIK.use_deform = False
+
+# Set custom shapes
+bpy.ops.object.mode_set(mode='OBJECT')
+armature.pose.bones['Foot_IK.R'].custom_shape = bone_shape_cube
+bpy.context.object.data.bones['Foot_IK.R'].show_wire = True
+armature.pose.bones['Foot_IK.L'].custom_shape = bone_shape_cube
+bpy.context.object.data.bones['Foot_IK.L'].show_wire = True
+armature.pose.bones['Knee_IK.R'].custom_shape = bone_shape_sphere
+bpy.context.object.data.bones['Knee_IK.R'].show_wire = True
+armature.pose.bones['Knee_IK.L'].custom_shape = bone_shape_sphere
+bpy.context.object.data.bones['Knee_IK.L'].show_wire = True
+armature.pose.bones['Hand_IK.R'].custom_shape = bone_shape_cube
+bpy.context.object.data.bones['Hand_IK.R'].show_wire = True
+armature.pose.bones['Hand_IK.L'].custom_shape = bone_shape_cube
+bpy.context.object.data.bones['Hand_IK.L'].show_wire = True
+armature.pose.bones['Elbow_IK.R'].custom_shape = bone_shape_sphere
+bpy.context.object.data.bones['Elbow_IK.R'].show_wire = True
+armature.pose.bones['Elbow_IK.L'].custom_shape = bone_shape_sphere
+bpy.context.object.data.bones['Elbow_IK.L'].show_wire = True
+
+# Set up IK Constraints
+bpy.ops.object.mode_set(mode='POSE')
+bpose = bpy.context.object.pose
+
+bpose.bones['Bip01_R_Forearm'].constraints.new(type='IK')
+bpose.bones['Bip01_R_Forearm'].constraints['IK'].target = bpy.data.objects['Armature']
+bpose.bones['Bip01_R_Forearm'].constraints['IK'].subtarget = 'Hand_IK.R'
+bpose.bones['Bip01_R_Forearm'].constraints['IK'].chain_count = 2
+
+bpose.bones['Bip01_L_Forearm'].constraints.new(type='IK')
+bpose.bones['Bip01_L_Forearm'].constraints['IK'].target = bpy.data.objects['Armature']
+bpose.bones['Bip01_L_Forearm'].constraints['IK'].subtarget = 'Hand_IK.L'
+bpose.bones['Bip01_L_Forearm'].constraints['IK'].chain_count = 2
+
+bpose.bones['Bip01_R_UpperArm'].constraints.new(type='IK')
+bpose.bones['Bip01_R_UpperArm'].constraints['IK'].target = bpy.data.objects['Armature']
+bpose.bones['Bip01_R_UpperArm'].constraints['IK'].subtarget = 'Elbow_IK.R'
+bpose.bones['Bip01_R_UpperArm'].constraints['IK'].chain_count = 1
+
+bpose.bones['Bip01_L_UpperArm'].constraints.new(type='IK')
+bpose.bones['Bip01_L_UpperArm'].constraints['IK'].target = bpy.data.objects['Armature']
+bpose.bones['Bip01_L_UpperArm'].constraints['IK'].subtarget = 'Elbow_IK.L'
+bpose.bones['Bip01_L_UpperArm'].constraints['IK'].chain_count = 1
+
+
+" >> .\import.txt
 
 # Set material mode. # iterate through areas in current screen
 "for area in bpy.context.screen.areas:
@@ -379,6 +520,27 @@ bpy.ops.object.parent_set(type='ARMATURE_NAME', xmirror=False, keep_transform=Tr
 			if space.type == 'VIEW_3D': 
 				space.viewport_shade = 'MATERIAL'
 				" >> .\import.txt
+
+# Move all the empties to layer 5
+"empties = [obj for obj in bpy.data.objects if obj.name.startswith('fire') or obj.name.startswith('`$physics') or obj.name.endswith('_fx') or obj.name.endswith('_case')]
+for empty in empties:
+	empty.layers[4] = True
+	empty.layers[0] = False
+
+" >> .\import.txt
+
+# Move all the weapons/custom geometry to layer 2
+foreach ($weapon in $weapons) {
+	#"weapon = [obj for obj in bpy.data.objects if obj.name."
+}
+
+# Create a Group for the mech to make Linking in other blend files simpler.
+#"Generate Groups for each object." >> .\import.txt
+#"for obj in bpy.context.selectable_objects:
+#	if (obj.name != 'Camera' and obj.name != 'Lamp' and obj.name != 'Cube'):
+#		bpy.data.groups.new(obj.name)
+#		bpy.data.groups[obj.name].objects.link(obj)
+#" >> .\import.txt
 
 "" >> .\import.txt # Send a final line feed.
 
