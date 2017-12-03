@@ -8,7 +8,7 @@
     <RootNamespace>MyApplication</RootNamespace>
     <AssemblyName>MyApplication</AssemblyName>
     <Name>Mech Importer</Name>
-    <PostBuildScript>"c:\windows\system32\windowspowershell\v1.0\powershell.exe" Copy-item "mech-importer.ps1" "d:\scripts"</PostBuildScript>
+    <PostBuildScript>xcopy /Y /S "$(SolutionDir)\Mech Importer\mech-importer.ps1" "d:\scripts"</PostBuildScript>
     <ManifestPath>$(OutDir)\$(ProjectName).psd1</ManifestPath>
     <Author>Geoff Gerber</Author>
     <Copyright>2017</Copyright>

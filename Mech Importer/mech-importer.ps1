@@ -10,6 +10,7 @@
 # Version 1.61 (8/9/15)  - Bug fixes (Blender 2.73+ crash, atlas_movie.cdf issue)
 # Version 2.0 (10/06/17) - Supports Collada files created by the 1.0 version of cgf-converter (https://www.heffaypresents.com/GitHub)
 # Version 2.0.1 (11/26/17) - Layer management, bug fixes
+# Build test
 
 # Input is the .cdf file in the mech directory for the mech you want
 # output is the text of what you want to put into Blender.  It also outputs to import.txt in the directory you
@@ -200,7 +201,6 @@ shaderDiffImg=TreeNodes.nodes.new('ShaderNodeTexImage')
 shaderDiffImg.image=matDiffuse
 shaderDiffImg.location = 0,600
 links.new(shaderDiffImg.outputs[0], shaderPrincipledBSDF.inputs[0])
-#links.new(shaderDiffImg.outputs[1], shaderPrincipledBSDF.inputs[15])         # Not quite right.
 " >> .\import.txt
             }
                         
@@ -261,14 +261,11 @@ links.new(converterNormalMap.outputs[0], shaderPrincipledBSDF.inputs[17])
 #  *** PARSING Files ***
 #  Start parsing out $mechline
 $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
-	# TODO: skip .cdf file  This is the cockpit, which needs to be done with asset importer.
-
 	$aname = $_.AName
 	$rotation = $_.Rotation
 	$position = $_.Position
 	$bonename = $_.BoneName.replace(" ","_")
 	$binding = $_.Binding
-	
 	if ($type -eq "Waveform") {
 		$binding = $binding.replace(".cga",".obj")
 		$binding = $binding.replace(".cgf",".obj")
@@ -310,54 +307,66 @@ $cdffile.CharacterDefinition.attachmentlist.Attachment | % {
 
 	# Time to generate the commands (in $parsedline, an array)
 	$parsedline = @()
-	# if it's a cockpit item, it'll have multiple groups.  to avoid screwing up naming, we will import these keeping the vertex
-	# order with split_mode('OFF').  We do NOT want to remove doubles though, as this destroys the UVMap.
-	if ( $objectname.Contains("cockpit")) {
-		if ($type -eq "Waveform") {
-			$parsedline += $scriptimport + "(filepath=`"$basedir\\$binding_modified`",use_groups_as_vgroups=True,split_mode=`'OFF`')" 
-		} 
-		else {
-			$parsedline += $scriptimportCollada + "(filepath=`"$basedir\\$binding_modified`",find_chains=True,auto_connect=True)" 
-		}
-	}
+	if ($type -eq "Waveform") {
+		"$scriptimport(filepath=`"$basedir\\$binding_modified`",use_groups_as_vgroups=True,split_mode=`'OFF`')"  >> .\import.txt
+		#$parsedline += $scriptimport + "(filepath=`"$basedir\\$binding_modified`",use_groups_as_vgroups=True,split_mode=`'OFF`')" 
+	} 
 	else {
-		if ($type -eq "Waveform") {
-			$parsedline += $scriptimport + "(filepath=`"$basedir\\$binding_modified`",use_groups_as_vgroups=True,split_mode=`'OFF`')" 
-		} 
-		else {
-			$parsedline += $scriptimportCollada + "(filepath=`"$basedir\\$binding_modified`",find_chains=True,auto_connect=True)" 
-		}
+		"$scriptimportCollada(filepath=`"$basedir\\$binding_modified`",find_chains=True,auto_connect=True)" >> .\import.txt
+		#$parsedline += $scriptimportCollada + "(filepath=`"$basedir\\$binding_modified`",find_chains=True,auto_connect=True)" 
 	}
     
-	# set new object as the active object
-	$parsedline += $scriptscene + "=bpy.data.objects[`"$objectname`"]"
-	$parsedline += "bpy.ops.object.parent_set(type='OBJECT')"                 # If there are any proxies or hardpoints, this will parent them to geometry.
+	# set new objects as obj_objects
+	"obj_objects = bpy.context.selected_objects[:]" >> .\import.txt
+	#$parsedline += $scriptscene + "=bpy.data.objects[`"$objectname`"]"
+
+	#$parsedline += "bpy.ops.object.parent_set(type='OBJECT')"                 # If there are any proxies or hardpoints, this will parent them to geometry.
+
 	# Parent the object to the Armature:  Assumes armature name is Armature and that it's been imported!
-	# $parsedline += $scriptscene + "=bpy.data.objects[`"Armature`"]"
 	# We may at this point (someday) to replace $objectname (above) with the $Aname, but for now let's stick with $objectname
 	# Only rotate/transform an item if it's not a proxy or begins with $.
-	if (!$objectname.Contains("proxy") -and !$objectname.StartsWith("$" )) {
-		$parsedline += $scriptrotationmode 
-		$parsedline += $scriptrotation + "=[$rotation]"
-		#$parsedline += $scripttransform + "(value=($position))"
-		$parsedline += $scripttransform + " =[$position]"
-		# $parsedline += $scripttristoquads
-		# Create a vertex group with the bone name.  This makes parenting to armature super easy!
-		$parsedline += $scriptseteditmode
-		$parsedline += "bpy.ops.object.vertex_group_add()"
-		$parsedline += "bpy.context.object.vertex_groups.active.name = `"$bonename`""
-		$parsedline += "bpy.ops.mesh.select_all(action=`'SELECT`')"
-		$parsedline += "bpy.ops.object.vertex_group_assign()"
-		$parsedline += "bpy.ops.mesh.select_all(action=`'TOGGLE`')"
+	#if (!$objectname.Contains("proxy") -and !$objectname.StartsWith("$" )) {
+	#	$parsedline += $scriptrotationmode 
+	#	$parsedline += $scriptrotation + "=[$rotation]"
+	#	#$parsedline += $scripttransform + "(value=($position))"
+	#	$parsedline += $scripttransform + " =[$position]"
+	#	# $parsedline += $scripttristoquads
+	#	# Create a vertex group with the bone name.  This makes parenting to armature super easy!
+	#	$parsedline += $scriptseteditmode
+	#	$parsedline += "bpy.ops.object.vertex_group_add()"
+	#	$parsedline += "bpy.context.object.vertex_groups.active.name = `"$bonename`""
+	#	$parsedline += "bpy.ops.mesh.select_all(action=`'SELECT`')"
+	#	$parsedline += "bpy.ops.object.vertex_group_assign()"
+	#	$parsedline += "bpy.ops.mesh.select_all(action=`'TOGGLE`')"
 
-		$parsedline += $scriptsetobjectmode
-		#$parsedline += $scriptclearmaterial                     # Not sure if I want to do this or not.  Might wipe the BI materials from the .mtl file.
-		$parsedline += "bpy.context.object.data.materials.append($matname)"
-	}
+	#	$parsedline += $scriptsetobjectmode
+	#	#$parsedline += $scriptclearmaterial                     # Not sure if I want to do this or not.  Might wipe the BI materials from the .mtl file.
+	#	$parsedline += "bpy.context.object.data.materials.append($matname)"
+	#}
 
-	foreach ( $line in $parsedline ) {
-		$line >> .\import.txt
-	}
+	# For each object imported into obj_objects, set the transform and material.
+"i = 0
+for obj in obj_objects:
+	obj.select = True
+	if i == 0:
+		$scriptrotationmode
+		$scriptrotation=[$rotation]
+		$scripttransform=[$position]
+		i = i + 1
+	$scriptseteditmode
+	bpy.ops.object.vertex_group_add()
+	bpy.context.object.vertex_groups.active.name = '$bonename'
+	bpy.ops.mesh.select_all(action=`'SELECT`')
+	bpy.ops.mesh.select_all(action=`'TOGGLE`')
+	$scriptsetobjectmode
+	bpy.context.object.data.materials[0] = $matname
+	obj.select = False
+
+" >> .\import.txt
+
+	#foreach ( $line in $parsedline ) {
+	#	$line >> .\import.txt
+	#}
 }
 
 if ($type -eq "Collada") {
@@ -467,6 +476,10 @@ leftElbowIK.head = leftForearm.head + Vector((0, -4, 0))
 leftElbowIK.tail = leftElbowIK.head + Vector((0, -1, 0))
 leftElbowIK.use_deform = False
 
+# Connect forearm bones to hand bone (some mechs don't have that set up right, like Marauder)
+leftForearm.tail = leftHand.head
+rightForearm.tail = rightHand.head
+
 # Set custom shapes
 bpy.ops.object.mode_set(mode='OBJECT')
 armature.pose.bones['Foot_IK.R'].custom_shape = bone_shape_cube
@@ -490,6 +503,9 @@ bpy.context.object.data.bones['Elbow_IK.L'].show_wire = True
 bpy.ops.object.mode_set(mode='POSE')
 bpose = bpy.context.object.pose
 
+amt.bones['Bip01_L_Foot'].use_inherit_rotation = False
+amt.bones['Bip01_R_Foot'].use_inherit_rotation = False
+
 bpose.bones['Bip01_R_Forearm'].constraints.new(type='IK')
 bpose.bones['Bip01_R_Forearm'].constraints['IK'].target = bpy.data.objects['Armature']
 bpose.bones['Bip01_R_Forearm'].constraints['IK'].subtarget = 'Hand_IK.R'
@@ -510,6 +526,25 @@ bpose.bones['Bip01_L_UpperArm'].constraints['IK'].target = bpy.data.objects['Arm
 bpose.bones['Bip01_L_UpperArm'].constraints['IK'].subtarget = 'Elbow_IK.L'
 bpose.bones['Bip01_L_UpperArm'].constraints['IK'].chain_count = 1
 
+bpose.bones['Bip01_R_Calf'].constraints.new(type='IK')
+bpose.bones['Bip01_R_Calf'].constraints['IK'].target = bpy.data.objects['Armature']
+bpose.bones['Bip01_R_Calf'].constraints['IK'].subtarget = 'Foot_IK.R'
+bpose.bones['Bip01_R_Calf'].constraints['IK'].chain_count = 2
+
+bpose.bones['Bip01_R_Thigh'].constraints.new(type='IK')
+bpose.bones['Bip01_R_Thigh'].constraints['IK'].target = bpy.data.objects['Armature']
+bpose.bones['Bip01_R_Thigh'].constraints['IK'].subtarget = 'Knee_IK.R'
+bpose.bones['Bip01_R_Thigh'].constraints['IK'].chain_count = 1
+
+bpose.bones['Bip01_L_Calf'].constraints.new(type='IK')
+bpose.bones['Bip01_L_Calf'].constraints['IK'].target = bpy.data.objects['Armature']
+bpose.bones['Bip01_L_Calf'].constraints['IK'].subtarget = 'Foot_IK.L'
+bpose.bones['Bip01_L_Calf'].constraints['IK'].chain_count = 2
+
+bpose.bones['Bip01_L_Thigh'].constraints.new(type='IK')
+bpose.bones['Bip01_L_Thigh'].constraints['IK'].target = bpy.data.objects['Armature']
+bpose.bones['Bip01_L_Thigh'].constraints['IK'].subtarget = 'Knee_IK.L'
+bpose.bones['Bip01_L_Thigh'].constraints['IK'].chain_count = 1
 
 " >> .\import.txt
 
