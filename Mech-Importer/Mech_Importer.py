@@ -62,6 +62,7 @@ bl_info = {
 # store keymaps here to access after registration
 addon_keymaps = []
 weapons = { "hero","missile","narc","uac", "uac2", "uac5", "uac10", "uac20", "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx","laser","ams","phoenix","blank","invasion" }
+materials = {}      # All the materials found for the mech
 
 def strip_slash(line_split):
     if line_split[-1][-1] == 92:  # '\' char
@@ -84,18 +85,62 @@ def get_mech(filepath):
 def import_armature(rig):
     bpy.ops.wm.collada_import(filepath=rig, find_chains=True,auto_connect=True)
 
-def create_materials(matfile):
-    materials = ET.parse(matfile)
+def create_materials(matfile, basedir):
+    mats = ET.parse(matfile)
+    print("Basedir: " + basedir)
     #submaterials = materials.iter("SubMaterials")
-    for mats in materials.iter("Material"):
-        if "Name" in mats.attrib:
-            print(mats.attrib)
-            # mats is a dictionary with the attribs and textures
-            for texture in mats.iter("Texture"):
-                print(texture.attrib)
+    for mat in mats.iter("Material"):
+        if "Name" in mat.attrib:
+            # An actual material.  Create the material, set to nodes, clear and rebuild using the info from the material XML file.
+            name = mat.attrib["Name"]
+            matname = bpy.data.materials.new(mat.attrib["Name"])
+            materials[name] = matname
+            print("Found material: " + matname.name)
+            matname.use_nodes = True
+            tree_nodes = matname.node_tree
+            links = tree_nodes.links
+
+            for n in tree_nodes.nodes:
+                tree_nodes.nodes.remove(n)
+
+            # Every material will have a PrincipledBSDF and Material output.  Add, place, and link.
+            shaderPrincipledBSDF = tree_nodes.nodes.new('ShaderNodeBsdfPrincipled')
+            shaderPrincipledBSDF.location =  300,500
+            shout=tree_nodes.nodes.new('ShaderNodeOutputMaterial')
+            shout.location = 500,500
+            links.new(shaderPrincipledBSDF.outputs[0], shout.inputs[0])
+            # For each Texture element, add the file and plug in to the appropriate slot on the PrincipledBSDF shader
+            for texture in mat.iter("Texture"):
+                print("Adding texture " + texture.attrib["Map"])
+                if texture.attrib["Map"] == "Diffuse":
+                    texturefile = os.path.normpath(os.path.join(basedir, os.path.splitext(texture.attrib["File"])[0] + ".dds"))
+                    matDiffuse = bpy.data.images.load(filepath=texturefile, check_existing=True)
+                    shaderDiffImg = tree_nodes.nodes.new('ShaderNodeTexImage')
+                    shaderDiffImg.image=matDiffuse
+                    shaderDiffImg.location = 0,600
+                    links.new(shaderDiffImg.outputs[0], shaderPrincipledBSDF.inputs[0])
+                if texture.attrib["Map"] == "Specular":
+                    texturefile = os.path.normpath(os.path.join(basedir, os.path.splitext(texture.attrib["File"])[0] + ".dds"))
+                    matSpec=bpy.data.images.load(filepath=texturefile, check_existing=True)
+                    shaderSpecImg=tree_nodes.nodes.new('ShaderNodeTexImage')
+                    shaderSpecImg.color_space = 'NONE'
+                    shaderSpecImg.image=matSpec
+                    shaderSpecImg.location = 0,325
+                    links.new(shaderSpecImg.outputs[0], shaderPrincipledBSDF.inputs[5])
+                if texture.attrib["Map"] == "Bumpmap":
+                    texturefile = os.path.normpath(os.path.join(basedir, os.path.splitext(texture.attrib["File"])[0] + ".dds"))
+                    matNormal=bpy.data.images.load(filepath=texturefile, check_existing=True)
+                    shaderNormalImg=tree_nodes.nodes.new('ShaderNodeTexImage')
+                    shaderNormalImg.color_space = 'NONE'
+                    shaderNormalImg.image=matNormal
+                    shaderNormalImg.location = -100,0
+                    converterNormalMap=tree_nodes.nodes.new('ShaderNodeNormalMap')
+                    converterNormalMap.location = 100,0
+                    links.new(shaderNormalImg.outputs[0], converterNormalMap.inputs[1])
+                    links.new(converterNormalMap.outputs[0], shaderPrincipledBSDF.inputs[17])
     return
 
-def import_mech(context, filepath):
+def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     print("Import Mech")
     print(filepath)
     cdffile = filepath      # The input file
@@ -108,9 +153,8 @@ def import_mech(context, filepath):
     bpy.context.scene.render.engine = 'CYCLES'      # Set to cycles mode
     import_armature(os.path.join(bodydir, mech + ".dae"))   # import the armature.
     # Create the materials.
-    materials = create_materials(matfile)
+    materials = create_materials(matfile, basedir)
     return {'FINISHED'}
-
 
 class ObjectMoveX(bpy.types.Operator):
     """My Object Moving Script"""      # blender will use this as a tooltip for menu items and buttons.
@@ -173,17 +217,38 @@ class MechImporter(bpy.types.Operator, ImportHelper, IOOBJOrientationHelper):
         options={'HIDDEN'},
         )
 
+    texture_type = EnumProperty(
+        name="Texture Type",
+        description = "Identify the type of texture file imported into the Texture nodes.",
+        items = (('ON', "DDS", "Reference DDS files for textures."),
+                 ('OFF', "TIF", "Reference TIF files for textures."),
+                 ),
+        )
+
     path_mode = path_reference_mode
     check_extension = True
     def execute(self, context):
+        if self.texture_type == 'OFF':
+            self.use_tif = False
+        else:
+            self.use_dds = False
+        keywords = {}
         if bpy.data.is_saved and context.user_preferences.filepaths.use_relative_paths:
             import os
             keywords["relpath"] = os.path.dirname(bpy.data.filepath)
         fdir = self.properties.filepath
-        return import_mech(context, fdir)
+        #keywords["cdffile"] = fdir
+        return import_mech(context, fdir, **keywords)
 
     def draw(self, context):
         layout = self.layout
+
+        row = layout.row(align = True)
+        box = layout.box()
+        box.label("Select texture type")
+        row = box.row()
+        row.prop(self, "texture_type", expand = True)
+
 
 def menu_func_import(self, context):
     self.layout.operator(MechImporter.bl_idname, text="Import Mech")
@@ -192,9 +257,6 @@ def menu_func(self, context):
     self.layout.operator(ObjectCursorArray.bl_idname)
 
 def register():
-    bpy.utils.register_class(ObjectCursorArray)
-    bpy.utils.register_class(ObjectMoveX)
-    bpy.utils.register_class(HelloWorldPanel)
     bpy.utils.register_class(MechImporter)
     bpy.types.VIEW3D_MT_object.append(menu_func)
     # handle the keymap
@@ -214,9 +276,6 @@ def unregister():
     #    wm.keyconfigs.addon.keymaps.remove(km)
     # clear the list
     del addon_keymaps[:]
-    bpy.utils.unregister_class(ObjectCursorArray) 
-    bpy.utils.unregister_class(ObjectMoveX)
-    bpy.utils.unregister_class(HelloWorldPanel)
     bpy.utils.unregister_class(MechImporter)
 
 # This allows you to run the script directly from blenders text editor
