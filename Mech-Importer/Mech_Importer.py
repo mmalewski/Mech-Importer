@@ -30,6 +30,8 @@ import mathutils
 import array
 import os
 import time
+import xml.etree as etree
+import xml.etree.ElementTree as ET
 from bpy_extras.io_utils import unpack_list
 from bpy_extras.image_utils import load_image
 from progress_report import ProgressReport, ProgressReportSubstep
@@ -59,6 +61,7 @@ bl_info = {
 
 # store keymaps here to access after registration
 addon_keymaps = []
+weapons = { "hero","missile","narc","uac", "uac2", "uac5", "uac10", "uac20", "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx","laser","ams","phoenix","blank","invasion" }
 
 def strip_slash(line_split):
     if line_split[-1][-1] == 92:  # '\' char
@@ -69,9 +72,43 @@ def strip_slash(line_split):
         return True
     return False
 
+def get_base_dir(filepath):
+    return os.path.abspath(os.path.join(os.path.dirname(filepath), os.pardir, os.pardir, os.pardir))
+
+def get_body_dir(filepath):
+    return os.path.join(os.path.dirname(filepath), "body")
+
+def get_mech(filepath):
+    return os.path.splitext(os.path.basename(filepath))[0]
+
+def import_armature(rig):
+    bpy.ops.wm.collada_import(filepath=rig, find_chains=True,auto_connect=True)
+
+def create_materials(matfile):
+    materials = ET.parse(matfile)
+    #submaterials = materials.iter("SubMaterials")
+    for mats in materials.iter("Material"):
+        if "Name" in mats.attrib:
+            print(mats.attrib)
+            # mats is a dictionary with the attribs and textures
+            for texture in mats.iter("Texture"):
+                print(texture.attrib)
+    return
+
 def import_mech(context, filepath):
     print("Import Mech")
     print(filepath)
+    cdffile = filepath      # The input file
+    # Split up filepath into the variables we want.
+    basedir = get_base_dir(filepath)
+    bodydir = get_body_dir(filepath)
+    mech = get_mech(filepath)
+    matfile = os.path.join(bodydir, mech + "_body.mtl")
+    print(matfile)
+    bpy.context.scene.render.engine = 'CYCLES'      # Set to cycles mode
+    import_armature(os.path.join(bodydir, mech + ".dae"))   # import the armature.
+    # Create the materials.
+    materials = create_materials(matfile)
     return {'FINISHED'}
 
 
@@ -143,7 +180,6 @@ class MechImporter(bpy.types.Operator, ImportHelper, IOOBJOrientationHelper):
             import os
             keywords["relpath"] = os.path.dirname(bpy.data.filepath)
         fdir = self.properties.filepath
-        print(fdir)
         return import_mech(context, fdir)
 
     def draw(self, context):
