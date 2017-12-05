@@ -23,6 +23,8 @@
 # https://www.heffaypresents.com/GitHub
 
 import bpy
+import bpy.types
+import bpy.utils
 import types
 import bmesh
 import math
@@ -61,7 +63,9 @@ bl_info = {
 
 # store keymaps here to access after registration
 addon_keymaps = []
-weapons = { "hero","missile","narc","uac", "uac2", "uac5", "uac10", "uac20", "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx","laser","ams","phoenix","blank","invasion" }
+weapons = [ "hero","missile","narc","uac", "uac2", "uac5", "uac10", "uac20", 
+           "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx",
+           "laser","ams","phoenix","blank","invasion", "hmg", "lmg", "lams" ]
 materials = {}      # All the materials found for the mech
 
 def strip_slash(line_split):
@@ -87,8 +91,6 @@ def import_armature(rig):
 
 def create_materials(matfile, basedir):
     mats = ET.parse(matfile)
-    print("Basedir: " + basedir)
-    #submaterials = materials.iter("SubMaterials")
     for mat in mats.iter("Material"):
         if "Name" in mat.attrib:
             # An actual material.  Create the material, set to nodes, clear and rebuild using the info from the material XML file.
@@ -140,6 +142,64 @@ def create_materials(matfile, basedir):
                     links.new(converterNormalMap.outputs[0], shaderPrincipledBSDF.inputs[17])
     return
 
+def import_geometry(cdffile, basedir, bodydir, mechname):
+    print("Importing mech geometry...")
+    geometry = ET.parse(cdffile)
+    for geo in geometry.iter("Attachment"):
+        print("Importing " + geo.attrib["AName"])
+        # Get all the attribs
+        aname = geo.attrib["AName"]
+        rotation = geo.attrib["Rotation"].split(',')
+        position = geo.attrib["Position"].split(',')
+        bonename = geo.attrib["BoneName"].replace(' ','_')
+        binding = os.path.join(basedir, os.path.splitext(geo.attrib["Binding"])[0] + ".dae")
+        flags = geo.attrib["Flags"]
+        # Materials depend on the part type.  For most, <mech>_body.  Weapons is <mech>_variant.  Window/cockpit is 
+        # <mech>_window.
+        materialname = mechname + "_body"
+        if any(weapon in aname for weapon in weapons):
+            materialname = mechname + "_variant"
+        if "head_cockpit" in aname:
+            materialname = mechname + "_window"
+            print("material name:" + materialname)
+        # We now have all the geometry parts that need to be imported, their loc/rot, and material.  Import.
+        bpy.ops.wm.collada_import(filepath=binding,find_chains=True,auto_connect=True)
+        obj_objects = bpy.context.selected_objects[:]
+        i = 0
+        #for obj in obj_objects:
+        #    obj.select = False
+        for obj in obj_objects:
+            bpy.context.scene.objects.active = obj
+            print("Name: " + obj.name)
+            if i == 0:
+                bpy.context.active_object.rotation_mode = 'QUATERNION'
+                #print("Rotation = " + rotation)
+                print("Rotation w = " + rotation[0])
+                print("Rotation x = " + rotation[1])
+                print("Rotation y = " + rotation[2])
+                print("Rotation z = " + rotation[3])
+                print(bpy.context.active_object.rotation_quaternion)
+                #bpy.context.active_object.rotation_quaternion = [rotation]
+                bpy.context.active_object.rotation_quaternion.w = float(rotation[0])
+                bpy.context.active_object.rotation_quaternion.x = float(rotation[1])
+                bpy.context.active_object.rotation_quaternion.y = float(rotation[2])
+                bpy.context.active_object.rotation_quaternion.z = float(rotation[3])
+                #bpy.context.active_object.location = [position]
+                bpy.context.active_object.location.x = float(position[0])
+                bpy.context.active_object.location.y = float(position[1])
+                bpy.context.active_object.location.z = float(position[2])
+                i = i + 1
+            
+            if not obj.type == 'EMPTY':
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.object.vertex_group_add()
+                bpy.context.object.vertex_groups.active.name = bonename
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.mesh.select_all(action='TOGGLE')
+                bpy.ops.object.mode_set(mode='OBJECT')
+                bpy.context.object.data.materials[0] = materials[materialname]
+            obj.select = False
+
 def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     print("Import Mech")
     print(filepath)
@@ -154,19 +214,8 @@ def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     import_armature(os.path.join(bodydir, mech + ".dae"))   # import the armature.
     # Create the materials.
     materials = create_materials(matfile, basedir)
+    geometry = import_geometry(cdffile, basedir, bodydir, mech)
     return {'FINISHED'}
-
-class ObjectMoveX(bpy.types.Operator):
-    """My Object Moving Script"""      # blender will use this as a tooltip for menu items and buttons.
-    bl_idname = "object.move_x"        # unique identifier for buttons and menu items to reference.
-    bl_label = "Move X by One"         # display name in the interface.
-    bl_options = {'REGISTER', 'UNDO'}  # enable undo for the operator.
-    def execute(self, context):        # execute() is called by blender when running the operator.
-        # The original script
-        scene = context.scene
-        for obj in scene.objects:
-            obj.location.x += 1.0
-        return {'FINISHED'}            # this lets blender know the operator finished successfully.
 
 class ObjectCursorArray(bpy.types.Operator):
     """Object Cursor Array"""
@@ -184,25 +233,6 @@ class ObjectCursorArray(bpy.types.Operator):
             factor = i / total
             obj_new.location = (obj.location * factor) + (cursor * (1.0 - factor))
         return {'FINISHED'}
-
-class HelloWorldPanel(bpy.types.Panel):
-    """Creates a Panel in the Object properties window"""
-    bl_label = "Hello World Panel"
-    bl_idname = "OBJECT_PT_hello"
-    bl_space_type = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_context = "object"
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-        row = layout.row()
-        row.label(text="Hello world!", icon='WORLD_DATA')
-        row = layout.row()
-        row.label(text="Active object is: " + obj.name)
-        row = layout.row()
-        row.prop(obj, "name")
-        row = layout.row()
-        row.operator("mesh.primitive_cube_add")
 
 IOOBJOrientationHelper = orientation_helper_factory("IOOBJOrientationHelper", axis_forward='-Z', axis_up='Y')
 
