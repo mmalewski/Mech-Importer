@@ -67,6 +67,7 @@ weapons = [ "hero","missile","narc","uac", "uac2", "uac5", "uac10", "uac20",
            "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx",
            "laser","ams","phoenix","blank","invasion", "hmg", "lmg", "lams" ]
 materials = {}      # All the materials found for the mech
+cockpit_materials = {}
 
 def strip_slash(line_split):
     if line_split[-1][-1] == 92:  # '\' char
@@ -90,6 +91,7 @@ def import_armature(rig):
     bpy.ops.wm.collada_import(filepath=rig, find_chains=True,auto_connect=True)
 
 def create_materials(matfile, basedir):
+    materials = {}
     mats = ET.parse(matfile)
     for mat in mats.iter("Material"):
         if "Name" in mat.attrib:
@@ -116,89 +118,86 @@ def create_materials(matfile, basedir):
                 print("Adding texture " + texture.attrib["Map"])
                 if texture.attrib["Map"] == "Diffuse":
                     texturefile = os.path.normpath(os.path.join(basedir, os.path.splitext(texture.attrib["File"])[0] + ".dds"))
-                    matDiffuse = bpy.data.images.load(filepath=texturefile, check_existing=True)
-                    shaderDiffImg = tree_nodes.nodes.new('ShaderNodeTexImage')
-                    shaderDiffImg.image=matDiffuse
-                    shaderDiffImg.location = 0,600
-                    links.new(shaderDiffImg.outputs[0], shaderPrincipledBSDF.inputs[0])
+                    if os.path.isfile(texturefile):
+                        matDiffuse = bpy.data.images.load(filepath=texturefile, check_existing=True)
+                        shaderDiffImg = tree_nodes.nodes.new('ShaderNodeTexImage')
+                        shaderDiffImg.image=matDiffuse
+                        shaderDiffImg.location = 0,600
+                        links.new(shaderDiffImg.outputs[0], shaderPrincipledBSDF.inputs[0])
                 if texture.attrib["Map"] == "Specular":
                     texturefile = os.path.normpath(os.path.join(basedir, os.path.splitext(texture.attrib["File"])[0] + ".dds"))
-                    matSpec=bpy.data.images.load(filepath=texturefile, check_existing=True)
-                    shaderSpecImg=tree_nodes.nodes.new('ShaderNodeTexImage')
-                    shaderSpecImg.color_space = 'NONE'
-                    shaderSpecImg.image=matSpec
-                    shaderSpecImg.location = 0,325
-                    links.new(shaderSpecImg.outputs[0], shaderPrincipledBSDF.inputs[5])
+                    if os.path.isfile(texturefile):
+                        matSpec=bpy.data.images.load(filepath=texturefile, check_existing=True)
+                        shaderSpecImg=tree_nodes.nodes.new('ShaderNodeTexImage')
+                        shaderSpecImg.color_space = 'NONE'
+                        shaderSpecImg.image=matSpec
+                        shaderSpecImg.location = 0,325
+                        links.new(shaderSpecImg.outputs[0], shaderPrincipledBSDF.inputs[5])
                 if texture.attrib["Map"] == "Bumpmap":
-                    texturefile = os.path.normpath(os.path.join(basedir, os.path.splitext(texture.attrib["File"])[0] + ".dds"))
-                    matNormal=bpy.data.images.load(filepath=texturefile, check_existing=True)
-                    shaderNormalImg=tree_nodes.nodes.new('ShaderNodeTexImage')
-                    shaderNormalImg.color_space = 'NONE'
-                    shaderNormalImg.image=matNormal
-                    shaderNormalImg.location = -100,0
-                    converterNormalMap=tree_nodes.nodes.new('ShaderNodeNormalMap')
-                    converterNormalMap.location = 100,0
-                    links.new(shaderNormalImg.outputs[0], converterNormalMap.inputs[1])
-                    links.new(converterNormalMap.outputs[0], shaderPrincipledBSDF.inputs[17])
-    return
+                    if os.path.isfile(texturefile):
+                        texturefile = os.path.normpath(os.path.join(basedir, os.path.splitext(texture.attrib["File"])[0] + ".dds"))
+                        matNormal=bpy.data.images.load(filepath=texturefile, check_existing=True)
+                        shaderNormalImg=tree_nodes.nodes.new('ShaderNodeTexImage')
+                        shaderNormalImg.color_space = 'NONE'
+                        shaderNormalImg.image=matNormal
+                        shaderNormalImg.location = -100,0
+                        converterNormalMap=tree_nodes.nodes.new('ShaderNodeNormalMap')
+                        converterNormalMap.location = 100,0
+                        links.new(shaderNormalImg.outputs[0], converterNormalMap.inputs[1])
+                        links.new(converterNormalMap.outputs[0], shaderPrincipledBSDF.inputs[17])
+    return materials
 
 def import_geometry(cdffile, basedir, bodydir, mechname):
     print("Importing mech geometry...")
     geometry = ET.parse(cdffile)
     for geo in geometry.iter("Attachment"):
-        print("Importing " + geo.attrib["AName"])
-        # Get all the attribs
-        aname = geo.attrib["AName"]
-        rotation = geo.attrib["Rotation"].split(',')
-        position = geo.attrib["Position"].split(',')
-        bonename = geo.attrib["BoneName"].replace(' ','_')
-        binding = os.path.join(basedir, os.path.splitext(geo.attrib["Binding"])[0] + ".dae")
-        flags = geo.attrib["Flags"]
-        # Materials depend on the part type.  For most, <mech>_body.  Weapons is <mech>_variant.  Window/cockpit is 
-        # <mech>_window.
-        materialname = mechname + "_body"
-        if any(weapon in aname for weapon in weapons):
-            materialname = mechname + "_variant"
-        if "head_cockpit" in aname:
-            materialname = mechname + "_window"
-            print("material name:" + materialname)
-        # We now have all the geometry parts that need to be imported, their loc/rot, and material.  Import.
-        bpy.ops.wm.collada_import(filepath=binding,find_chains=True,auto_connect=True)
-        obj_objects = bpy.context.selected_objects[:]
-        i = 0
-        #for obj in obj_objects:
-        #    obj.select = False
-        for obj in obj_objects:
-            bpy.context.scene.objects.active = obj
-            print("Name: " + obj.name)
-            if i == 0:
-                bpy.context.active_object.rotation_mode = 'QUATERNION'
-                #print("Rotation = " + rotation)
-                print("Rotation w = " + rotation[0])
-                print("Rotation x = " + rotation[1])
-                print("Rotation y = " + rotation[2])
-                print("Rotation z = " + rotation[3])
-                print(bpy.context.active_object.rotation_quaternion)
-                #bpy.context.active_object.rotation_quaternion = [rotation]
-                bpy.context.active_object.rotation_quaternion.w = float(rotation[0])
-                bpy.context.active_object.rotation_quaternion.x = float(rotation[1])
-                bpy.context.active_object.rotation_quaternion.y = float(rotation[2])
-                bpy.context.active_object.rotation_quaternion.z = float(rotation[3])
-                #bpy.context.active_object.location = [position]
-                bpy.context.active_object.location.x = float(position[0])
-                bpy.context.active_object.location.y = float(position[1])
-                bpy.context.active_object.location.z = float(position[2])
-                i = i + 1
+        if not geo.attrib["AName"] == "cockpit":
+            print("Importing " + geo.attrib["AName"])
+            # Get all the attribs
+            aname = geo.attrib["AName"]
+            rotation = geo.attrib["Rotation"].split(',')
+            position = geo.attrib["Position"].split(',')
+            bonename = geo.attrib["BoneName"].replace(' ','_')
+            binding = os.path.join(basedir, os.path.splitext(geo.attrib["Binding"])[0] + ".dae")
+            flags = geo.attrib["Flags"]
+            # Materials depend on the part type.  For most, <mech>_body.  Weapons is <mech>_variant.  Window/cockpit is 
+            # <mech>_window.
+            materialname = mechname + "_body"
+            if any(weapon in aname for weapon in weapons):
+                materialname = mechname + "_variant"
+            if "head_cockpit" in aname:
+                materialname = mechname + "_window"
+                print("material name:" + materialname)
+            # We now have all the geometry parts that need to be imported, their loc/rot, and material.  Import.
+            bpy.ops.wm.collada_import(filepath=binding,find_chains=True,auto_connect=True)
+            obj_objects = bpy.context.selected_objects[:]
+            i = 0
+            #for obj in obj_objects:
+            #    obj.select = False
+            for obj in obj_objects:
+                bpy.context.scene.objects.active = obj
+                print("Name: " + obj.name)
+                if i == 0:
+                    bpy.context.active_object.rotation_mode = 'QUATERNION'
+                    bpy.context.active_object.rotation_quaternion.w = float(rotation[0])
+                    bpy.context.active_object.rotation_quaternion.x = float(rotation[1])
+                    bpy.context.active_object.rotation_quaternion.y = float(rotation[2])
+                    bpy.context.active_object.rotation_quaternion.z = float(rotation[3])
+                    bpy.context.active_object.location.x = float(position[0])
+                    bpy.context.active_object.location.y = float(position[1])
+                    bpy.context.active_object.location.z = float(position[2])
+                    i = i + 1
             
-            if not obj.type == 'EMPTY':
-                bpy.ops.object.mode_set(mode='EDIT')
-                bpy.ops.object.vertex_group_add()
-                bpy.context.object.vertex_groups.active.name = bonename
-                bpy.ops.mesh.select_all(action='SELECT')
-                bpy.ops.mesh.select_all(action='TOGGLE')
-                bpy.ops.object.mode_set(mode='OBJECT')
-                bpy.context.object.data.materials[0] = materials[materialname]
-            obj.select = False
+                if not obj.type == 'EMPTY':
+                    bpy.ops.object.mode_set(mode='EDIT')
+                    bpy.ops.object.vertex_group_add()
+                    bpy.context.object.vertex_groups.active.name = bonename
+                    bpy.ops.mesh.select_all(action='SELECT')
+                    bpy.ops.mesh.select_all(action='TOGGLE')
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                    bpy.context.object.data.materials.append(bpy.data.materials[0])               # If there is no material, add a dummy mat.
+                    bpy.context.object.data.materials[0] = materials[materialname]
+                obj.select = False
 
 def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     print("Import Mech")
@@ -207,13 +206,17 @@ def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     # Split up filepath into the variables we want.
     basedir = get_base_dir(filepath)
     bodydir = get_body_dir(filepath)
+    mechdir = os.path.dirname(filepath)
     mech = get_mech(filepath)
     matfile = os.path.join(bodydir, mech + "_body.mtl")
-    print(matfile)
+    cockpit_matfile = os.path.join(mechdir, "cockpit_standard", mech + "_a_cockpit_standard.mtl")
+    print("Material file: " + matfile)
+    print("Cockpit material file: " + cockpit_matfile)
     bpy.context.scene.render.engine = 'CYCLES'      # Set to cycles mode
     import_armature(os.path.join(bodydir, mech + ".dae"))   # import the armature.
     # Create the materials.
     materials = create_materials(matfile, basedir)
+    cockpit_materials = create_materials(cockpit_matfile, basedir)
     geometry = import_geometry(cdffile, basedir, bodydir, mech)
     return {'FINISHED'}
 
