@@ -154,29 +154,29 @@ def import_geometry(cdffile, basedir, bodydir, mechname):
         if not geo.attrib["AName"] == "cockpit":
             print("Importing " + geo.attrib["AName"])
             # Get all the attribs
-            aname = geo.attrib["AName"]
+            aname    = geo.attrib["AName"]
             rotation = geo.attrib["Rotation"].split(',')
             position = geo.attrib["Position"].split(',')
             bonename = geo.attrib["BoneName"].replace(' ','_')
-            binding = os.path.join(basedir, os.path.splitext(geo.attrib["Binding"])[0] + ".dae")
-            flags = geo.attrib["Flags"]
+            binding  = os.path.join(basedir, os.path.splitext(geo.attrib["Binding"])[0] + ".dae")
+            flags    = geo.attrib["Flags"]
             # Materials depend on the part type.  For most, <mech>_body.  Weapons is <mech>_variant.  Window/cockpit is 
-            # <mech>_window.
+            # <mech>_window.  Also need to figure out how to deal with _generic materials after the import.
             materialname = mechname + "_body"
             if any(weapon in aname for weapon in weapons):
                 materialname = mechname + "_variant"
             if "head_cockpit" in aname:
                 materialname = mechname + "_window"
-                print("material name:" + materialname)
+                print("    material name:" + materialname)
             # We now have all the geometry parts that need to be imported, their loc/rot, and material.  Import.
             bpy.ops.wm.collada_import(filepath=binding,find_chains=True,auto_connect=True)
             obj_objects = bpy.context.selected_objects[:]
             i = 0
-            #for obj in obj_objects:
-            #    obj.select = False
             for obj in obj_objects:
+                print("    Materials for " + obj.name)
                 bpy.context.scene.objects.active = obj
-                print("Name: " + obj.name)
+                print("    Name: " + obj.name)
+                # If this is a parent node, rotate/translate it. Otherwise skip it.
                 if i == 0:
                     bpy.context.active_object.rotation_mode = 'QUATERNION'
                     bpy.context.active_object.rotation_quaternion.w = float(rotation[0])
@@ -187,16 +187,26 @@ def import_geometry(cdffile, basedir, bodydir, mechname):
                     bpy.context.active_object.location.y = float(position[1])
                     bpy.context.active_object.location.z = float(position[2])
                     i = i + 1
-            
+                
                 if not obj.type == 'EMPTY':
+                    print("    Object " + obj.name + " not an empty object.")
                     bpy.ops.object.mode_set(mode='EDIT')
                     bpy.ops.object.vertex_group_add()
                     bpy.context.object.vertex_groups.active.name = bonename
                     bpy.ops.mesh.select_all(action='SELECT')
                     bpy.ops.mesh.select_all(action='TOGGLE')
                     bpy.ops.object.mode_set(mode='OBJECT')
-                    bpy.context.object.data.materials.append(bpy.data.materials[0])               # If there is no material, add a dummy mat.
-                    bpy.context.object.data.materials[0] = materials[materialname]
+                    
+                    if len(bpy.context.object.material_slots) == 0:
+                        # no materials
+                        bpy.context.object.data.materials.append(bpy.data.materials[materialname])               # If there is no material, add a dummy mat.
+                    else:
+                        # Material corrections.  If material slot 0 contains "generic", it's a generic material.  Otherwise stays variant.
+                        if "generic" in obj.material_slots[0].name:
+                            materialname = mechname + "_generic"
+                        else:
+                            materialname = mechname + "_variant"
+                        bpy.context.object.data.materials[0] = bpy.data.materials[materialname]
                 obj.select = False
 
 def import_mech(context, filepath, *, use_dds=True, use_tif=False):
