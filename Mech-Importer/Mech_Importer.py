@@ -50,6 +50,7 @@ from bpy_extras.io_utils import (
         path_reference_mode,
         axis_conversion,
         )
+from math import radians
 
 bl_info = {
     "name": "Mech Importer", 
@@ -87,8 +88,35 @@ def get_body_dir(filepath):
 def get_mech(filepath):
     return os.path.splitext(os.path.basename(filepath))[0]
 
+def convert_to_rotation(rotation):
+    tmp = rotation.split(',')
+    w = float(tmp[0])
+    x = float(tmp[1])
+    y = float(tmp[2])
+    z = float(tmp[3])
+    return mathutils.Quaternion((w,x,y,z))
+
+def convert_to_location(location):
+    tmp = location.split(',')
+    x = float(tmp[0])
+    y = float(tmp[1])
+    z = float(tmp[2])
+    return mathutils.Vector((x,y,z))
+
+def get_transform_matrix(rotation, location):
+    mat_location = mathutils.Matrix.Translation(location)
+    mat_rotation = mathutils.Matrix.Rotation(rotation.angle, 4, rotation.axis)
+    mat_scale = mathutils.Matrix.Scale(1, 4, (0.0, 0.0, 1.0))  # Identity matrix
+    mat_out = mat_location * mat_rotation * mat_scale
+    return mat_out
+
 def import_armature(rig):
-    bpy.ops.wm.collada_import(filepath=rig, find_chains=True,auto_connect=True)
+    try:
+        bpy.ops.wm.collada_import(filepath=rig, find_chains=True,auto_connect=True)
+    except:
+        #File not found
+        return False
+    return True
 
 def create_materials(matfile, basedir):
     materials = {}
@@ -148,6 +176,7 @@ def create_materials(matfile, basedir):
     return materials
 
 def import_geometry(cdffile, basedir, bodydir, mechname):
+    armature = bpy.data.objects['Armature']
     print("Importing mech geometry...")
     geometry = ET.parse(cdffile)
     for geo in geometry.iter("Attachment"):
@@ -155,8 +184,8 @@ def import_geometry(cdffile, basedir, bodydir, mechname):
             print("Importing " + geo.attrib["AName"])
             # Get all the attribs
             aname    = geo.attrib["AName"]
-            rotation = geo.attrib["Rotation"].split(',')
-            position = geo.attrib["Position"].split(',')
+            rotation = convert_to_rotation(geo.attrib["Rotation"])
+            location = convert_to_location(geo.attrib["Position"])
             bonename = geo.attrib["BoneName"].replace(' ','_')
             binding  = os.path.join(basedir, os.path.splitext(geo.attrib["Binding"])[0] + ".dae")
             flags    = geo.attrib["Flags"]
@@ -173,29 +202,43 @@ def import_geometry(cdffile, basedir, bodydir, mechname):
             obj_objects = bpy.context.selected_objects[:]
             i = 0
             for obj in obj_objects:
-                print("    Materials for " + obj.name)
-                bpy.context.scene.objects.active = obj
-                print("    Name: " + obj.name)
-                # If this is a parent node, rotate/translate it. Otherwise skip it.
-                if i == 0:
-                    bpy.context.active_object.rotation_mode = 'QUATERNION'
-                    bpy.context.active_object.rotation_quaternion.w = float(rotation[0])
-                    bpy.context.active_object.rotation_quaternion.x = float(rotation[1])
-                    bpy.context.active_object.rotation_quaternion.y = float(rotation[2])
-                    bpy.context.active_object.rotation_quaternion.z = float(rotation[3])
-                    bpy.context.active_object.location.x = float(position[0])
-                    bpy.context.active_object.location.y = float(position[1])
-                    bpy.context.active_object.location.z = float(position[2])
-                    i = i + 1
-                
                 if not obj.type == 'EMPTY':
-                    print("    Object " + obj.name + " not an empty object.")
-                    bpy.ops.object.mode_set(mode='EDIT')
-                    bpy.ops.object.vertex_group_add()
-                    bpy.context.object.vertex_groups.active.name = bonename
-                    bpy.ops.mesh.select_all(action='SELECT')
-                    bpy.ops.mesh.select_all(action='TOGGLE')
-                    bpy.ops.object.mode_set(mode='OBJECT')
+                    armature.select = True
+                    bpy.context.scene.objects.active = armature
+                    bone_location = bpy.context.object.pose.bones[bonename].head
+                    bone_rotation = obj.rotation_quaternion
+                    print("    Original loc and rot: " + str(bone_location) + " and " + str(bone_rotation))
+                    print("    Materials for " + obj.name)
+                    bpy.context.scene.objects.active = obj
+                    print("    Name: " + obj.name)
+                    # If this is a parent node, rotate/translate it. Otherwise skip it.
+                    if i == 0:
+                        matrix = get_transform_matrix(rotation, location)       # Converts the location vector and rotation quat into a 4x4 matrix.
+                        #parent this first object to the appropriate bone
+                        obj.rotation_mode = 'QUATERNION'
+                        bone = armature.data.bones[bonename]
+                        #obj.matrix_parent_inverse = armature.data.bones[bonename].matrix_world.inverted()
+                        obj.parent = armature
+                        obj.parent_bone = bonename
+                        obj.parent_type = 'BONE'
+                        obj.matrix_world = matrix
+                        #obj.matrix_world = bone.matrix_local
+                        #bpy.context.active_object.rotation_quaternion = rotation
+                        #bpy.context.active_object.location = location - bone_location
+                        i = i + 1
+                    # Vertex groups
+                    #print("    Adding " + bonename + " to Vertex Group")
+                    vg = obj.vertex_groups.new(bonename)
+                    nverts = len(obj.data.vertices)
+                    for i in range(nverts):
+                        vg.add([i], 1.0, 'REPLACE')
+                    # old slow way. Never use bpy.ops!
+                    #bpy.ops.object.mode_set(mode='EDIT')
+                    #bpy.ops.object.vertex_group_add()
+                    #bpy.context.object.vertex_groups.active.name = bonename
+                    #bpy.ops.mesh.select_all(action='SELECT')
+                    #bpy.ops.mesh.select_all(action='TOGGLE')
+                    #bpy.ops.object.mode_set(mode='OBJECT')
                     
                     if len(bpy.context.object.material_slots) == 0:
                         # no materials
@@ -207,7 +250,33 @@ def import_geometry(cdffile, basedir, bodydir, mechname):
                         else:
                             materialname = mechname + "_variant"
                         bpy.context.object.data.materials[0] = bpy.data.materials[materialname]
-                obj.select = False
+                    obj.select = False
+                else:
+                    # empty object.
+                    print("    Empty object found.")
+
+def parent_geometry_to_bones():
+    #objects = bpy.data.objects
+    #for obj in objects:
+    #    if obj.name != 'Cube' and obj.name != 'Lamp' and obj.name != 'Camera': # and obj.type != 'EMPTY'
+    #        obj.select = True
+    #selected_objects = bpy.context.selected_objects
+    armature = bpy.data.objects['Armature']
+    amt=armature.data
+    armature.show_x_ray = True
+    armature.data.show_axes = True
+    armature.data.draw_type = 'BBONE'
+    #selected_objects.remove(armature)
+    #bpy.context.scene.objects.active = armature
+    #bpy.ops.object.parent_set(type='ARMATURE_NAME', xmirror=False, keep_transform=True)
+
+def set_viewport_shading():
+    # Set material mode. # iterate through areas in current screen
+    for area in bpy.context.screen.areas:
+        if area.type == 'VIEW_3D':
+            for space in area.spaces: 
+                if space.type == 'VIEW_3D': 
+                    space.viewport_shade = 'MATERIAL'
 
 def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     print("Import Mech")
@@ -220,14 +289,25 @@ def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     mech = get_mech(filepath)
     matfile = os.path.join(bodydir, mech + "_body.mtl")
     cockpit_matfile = os.path.join(mechdir, "cockpit_standard", mech + "_a_cockpit_standard.mtl")
-    print("Material file: " + matfile)
-    print("Cockpit material file: " + cockpit_matfile)
+    #print("Material file: " + matfile)
+    #print("Cockpit material file: " + cockpit_matfile)
     bpy.context.scene.render.engine = 'CYCLES'      # Set to cycles mode
-    import_armature(os.path.join(bodydir, mech + ".dae"))   # import the armature.
+    
+    # Set material mode. # iterate through areas in current screen
+    set_viewport_shading()
+    
+    # Try to import the armature.  If we can't find it, then return error.
+    result = import_armature(os.path.join(bodydir, mech + ".dae"))   # import the armature.
+    if result == False:    
+        print("Unable to find the armature at: " + os.path.join(bodydir, mech + ".dae"))
+        return False
+
     # Create the materials.
     materials = create_materials(matfile, basedir)
     cockpit_materials = create_materials(cockpit_matfile, basedir)
+    # Import the geometry and assign materials.
     geometry = import_geometry(cdffile, basedir, bodydir, mech)
+    parent_geometry_to_bones()
     return {'FINISHED'}
 
 class ObjectCursorArray(bpy.types.Operator):
