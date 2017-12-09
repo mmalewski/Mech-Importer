@@ -64,8 +64,9 @@ bl_info = {
 
 # store keymaps here to access after registration
 addon_keymaps = []
-weapons = [ "hero","missile","narc","uac", "uac2", "uac5", "uac10", "uac20", 
-           "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx",
+# There are misspelled words (missle).  Just an FYI.
+weapons = [ "hero","missile", "missle", "narc","uac", "uac2", "uac5", "uac10", "uac20", 
+           "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","lbx", "damaged",
            "laser","ams","phoenix","blank","invasion", "hmg", "lmg", "lams" ]
 materials = {}      # All the materials found for the mech
 cockpit_materials = {}
@@ -104,6 +105,7 @@ def convert_to_location(location):
     return mathutils.Vector((x,y,z))
 
 def get_transform_matrix(rotation, location):
+    # Given a location Vector and a Quaternion rotation, get the 4x4 transform matrix.  Assumes scale is 1.
     mat_location = mathutils.Matrix.Translation(location)
     mat_rotation = mathutils.Matrix.Rotation(rotation.angle, 4, rotation.axis)
     mat_scale = mathutils.Matrix.Scale(1, 4, (0.0, 0.0, 1.0))  # Identity matrix
@@ -113,6 +115,11 @@ def get_transform_matrix(rotation, location):
 def import_armature(rig):
     try:
         bpy.ops.wm.collada_import(filepath=rig, find_chains=True,auto_connect=True)
+        armature = bpy.data.objects['Armature']
+        amt=armature.data
+        armature.show_x_ray = True
+        armature.data.show_axes = True
+        armature.data.draw_type = 'BBONE'
     except:
         #File not found
         return False
@@ -175,6 +182,28 @@ def create_materials(matfile, basedir):
                         links.new(converterNormalMap.outputs[0], shaderPrincipledBSDF.inputs[17])
     return materials
 
+def create_bone_shapes():
+    # Bone Shapes.  Sphere for IK targets, cube for foot/hand/torso
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.5, calc_uvs=False)
+    me = bpy.data.meshes.new('Mesh')
+    bm.to_mesh(me)
+    bm.free()
+    bone_shape_cube = bpy.data.objects.new('bone_shape_cube', me)
+    bone_shape_cube.draw_type = 'WIRE'
+    bpy.context.scene.objects.link(bone_shape_cube)
+    bone_shape_cube.layers = [False]*19+[True]
+
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=0, diameter=1.0, calc_uvs=False)
+    me = bpy.data.meshes.new('Mesh')
+    bm.to_mesh(me)
+    bm.free()
+    bone_shape_sphere = bpy.data.objects.new('bone_shape_sphere', me)
+    bone_shape_sphere.draw_type = 'WIRE'
+    bpy.context.scene.objects.link(bone_shape_sphere)
+    bone_shape_sphere.layers = [False]*19+[True]
+
 def import_geometry(cdffile, basedir, bodydir, mechname):
     armature = bpy.data.objects['Armature']
     print("Importing mech geometry...")
@@ -217,14 +246,10 @@ def import_geometry(cdffile, basedir, bodydir, mechname):
                         #parent this first object to the appropriate bone
                         obj.rotation_mode = 'QUATERNION'
                         bone = armature.data.bones[bonename]
-                        #obj.matrix_parent_inverse = armature.data.bones[bonename].matrix_world.inverted()
                         obj.parent = armature
                         obj.parent_bone = bonename
                         obj.parent_type = 'BONE'
                         obj.matrix_world = matrix
-                        #obj.matrix_world = bone.matrix_local
-                        #bpy.context.active_object.rotation_quaternion = rotation
-                        #bpy.context.active_object.location = location - bone_location
                         i = i + 1
                     # Vertex groups
                     #print("    Adding " + bonename + " to Vertex Group")
@@ -255,21 +280,6 @@ def import_geometry(cdffile, basedir, bodydir, mechname):
                     # empty object.
                     print("    Empty object found.")
 
-def parent_geometry_to_bones():
-    #objects = bpy.data.objects
-    #for obj in objects:
-    #    if obj.name != 'Cube' and obj.name != 'Lamp' and obj.name != 'Camera': # and obj.type != 'EMPTY'
-    #        obj.select = True
-    #selected_objects = bpy.context.selected_objects
-    armature = bpy.data.objects['Armature']
-    amt=armature.data
-    armature.show_x_ray = True
-    armature.data.show_axes = True
-    armature.data.draw_type = 'BBONE'
-    #selected_objects.remove(armature)
-    #bpy.context.scene.objects.active = armature
-    #bpy.ops.object.parent_set(type='ARMATURE_NAME', xmirror=False, keep_transform=True)
-
 def set_viewport_shading():
     # Set material mode. # iterate through areas in current screen
     for area in bpy.context.screen.areas:
@@ -277,6 +287,19 @@ def set_viewport_shading():
             for space in area.spaces: 
                 if space.type == 'VIEW_3D': 
                     space.viewport_shade = 'MATERIAL'
+
+def set_layers():
+    # Set the layers that objects are on.
+    empties = [obj for obj in bpy.data.objects if obj.name.startswith('fire') or 'physics_proxy' in obj.name or obj.name.endswith('_fx') or obj.name.endswith('_case')]
+    for empty in empties:
+        empty.layers[4] = True
+        empty.layers[0] = False
+    # Set weapons and special geometry to layer 2
+    names = bpy.data.objects.keys()
+    for name in names:
+        if any(x in name for x in weapons):
+            bpy.data.objects[name].layers[1] = True
+            bpy.data.objects[name].layers[0] = False
 
 def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     print("Import Mech")
@@ -307,7 +330,14 @@ def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     cockpit_materials = create_materials(cockpit_matfile, basedir)
     # Import the geometry and assign materials.
     geometry = import_geometry(cdffile, basedir, bodydir, mech)
-    parent_geometry_to_bones()
+
+    # Set the layers for existing objects
+    set_layers()
+
+    # Advanced Rigging stuff.  Make bone shapes, IKs, etc.
+    # Create the bone shapes
+    bpy.ops.object.mode_set(mode='EDIT')
+    create_bone_shapes()
     return {'FINISHED'}
 
 class ObjectCursorArray(bpy.types.Operator):
@@ -372,7 +402,6 @@ class MechImporter(bpy.types.Operator, ImportHelper, IOOBJOrientationHelper):
         row = box.row()
         row.prop(self, "texture_type", expand = True)
 
-
 def menu_func_import(self, context):
     self.layout.operator(MechImporter.bl_idname, text="Import Mech")
 
@@ -389,7 +418,6 @@ def register():
     #kmi.properties.total = 4
     #addon_keymaps.append(km)
     bpy.types.INFO_MT_file_import.append(menu_func_import)
-
 
 def unregister():
     bpy.types.INFO_MT_file_import.remove(menu_func_import)
