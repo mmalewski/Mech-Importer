@@ -65,14 +65,18 @@ bl_info = {
 # store keymaps here to access after registration
 addon_keymaps = []
 # There are misspelled words (missle).  Just an FYI.
-weapons = [ "hero","missile", "missle", "narc","uac", "uac2", "uac5", "uac10", "uac20", "rac",
-           "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg_","_lbx", "damaged", "_mount",
+weapons = [ "hero","missile", "missle", "narc","uac", "uac2", "uac5", "uac10", "uac20", "rac", "_lty",
+           "ac2","ac5","ac10","ac20","gauss","ppc","flamer","_mg","_lbx", "damaged", "_mount",
            "laser","ams","_phoenix","blank","invasion", "hmg", "lmg", "lams", "hand", "barrel" ]
+control_bones = [ "Hand_IK.L", "Hand_IK.R", "Bip01", "Hip_Root", "Bip01_Pitch", "Bip01_Pelvis",
+                 "Knee_IK.R", "Knee_IK.L", "Foot_IK.R", "Foot_IK.L", "Elbow_IK.R", "Elbow_IK.L" ]
 materials = {}      # All the materials found for the mech
 cockpit_materials = {}
 WGT_PREFIX = "WGT-"  # Prefix for widget objects
 ROOT_NAME = "Bip01"   # Name of the root bone.
 WGT_LAYERS = [x == 19 for x in range(0, 20)]  # Widgets go on the last scene layer.
+CTRL_LAYERS = [x == 1 for x in range(0, 32)]  # Control bones
+GEO_LAYERS = [x == 2 for x in range(0, 32)]   # Deform bones go to layer 2
 
 def strip_slash(line_split):
     if line_split[-1][-1] == 92:  # '\' char
@@ -137,6 +141,11 @@ def import_armature(rig):
         #File not found
         return False
     return True
+
+def set_bone_layers(rig):
+    for bone in rig.data.bones:
+        if bone.name not in control_bones:
+            bone.layers = GEO_LAYERS
 
 def obj_to_bone(obj, rig, bone_name):
     # From Rigify.  Used for widget creation
@@ -491,62 +500,18 @@ def create_sphere_widget(rig, bone_name, bone_transform_name=None):
         mesh.from_pydata(verts, edges, [])
         mesh.update()
 
-def create_bone_shapes():
-    # Bone Shapes.  Sphere for IK targets, cube for foot/hand/torso
-    # Cube for Hand and Foot controllers
-    bm = bmesh.new()
-    bmesh.ops.create_cube(bm, size=1.5, calc_uvs=False)
-    me = bpy.data.meshes.new('Mesh')
-    bm.to_mesh(me)
-    bm.free()
-    bone_shape_cube = bpy.data.objects.new('bone_shape_cube', me)
-    bone_shape_cube.draw_type = 'WIRE'
-    bpy.context.scene.objects.link(bone_shape_cube)
-    bone_shape_cube.layers = [False]*19+[True]
-
-    # Sphere for IK Targetes
-    bm = bmesh.new()
-    bmesh.ops.create_icosphere(bm, subdivisions=0, diameter=1.0, calc_uvs=False)
-    me = bpy.data.meshes.new('Mesh')
-    bm.to_mesh(me)
-    bm.free()
-    bone_shape_sphere = bpy.data.objects.new('bone_shape_sphere', me)
-    bone_shape_sphere.draw_type = 'WIRE'
-    bpy.context.scene.objects.link(bone_shape_sphere)
-    bone_shape_sphere.layers = [False]*19+[True]
-
-    # Single Circle for Root Bone
-    bm = bmesh.new()
-    bmesh.ops.create_circle(bm, cap_ends=False, diameter=2.0, segments=8)
-    me = bpy.data.meshes.new("Mesh")
-    bm.to_mesh(me)
-    bm.free()
-    bone_shape_circle = bpy.data.objects.new("bone_shape_circle", me)
-    bpy.context.scene.objects.link(bone_shape_circle)
-    bone_shape_circle.layers = [False]*19+[True]
-
-    # Triple Circle for Torso Controllers
-    bm = bmesh.new()
-    bmesh.ops.create_circle(bm, cap_ends=False, diameter=2.0, segments=8)
-    me = bpy.data.meshes.new("Mesh")
-    bm.to_mesh(me)
-    bm.free()
-    bone_shape_torso = bpy.data.objects.new("bone_shape_torso", me)
-    bpy.context.scene.objects.link(bone_shape_torso)
-    bone_shape_torso.layers = [False]*19+[True]
-
 def create_IKs():
     armature = bpy.data.objects['Armature']
     amt = armature.data
     bpy.context.scene.objects.active = armature
     
-    # Get the scaling factor
-    #scale = get_scaling_factor(torso)
-
+    # EDIT MODE CHANGES
     bpy.ops.object.mode_set(mode='EDIT')
 
     # Set up hip and torso bones.  Connect Pelvis to Pitch
-    armature.data.edit_bones['Bip01_Pelvis'].tail = armature.data.edit_bones['Bip01_Pitch'].head
+    print(" *** Editing Pelvis Bone ***")
+    print("     Pelvis name: " + armature.data.edit_bones['Bip01_Pelvis'].name)
+    # armature.data.edit_bones['Bip01_Pelvis'].tail = armature.data.edit_bones['Bip01_Pitch'].head      # Causes Pelvis bone to disappear sometimes
     hip_root_bone = copy_bone(armature, "Bip01_Pelvis", "Hip_Root")
     armature.data.edit_bones['Hip_Root'].use_connect = False
     flip_bone(armature, "Hip_Root")
@@ -559,6 +524,7 @@ def create_IKs():
     rootbone.tail.y = rootbone.tail.z
     rootbone.tail.z = 0.0
     rootbone.use_deform = False
+    rootbone.use_connect = False
 
     rightThigh = bpy.context.object.data.edit_bones['Bip01_R_Thigh']
     rightCalf = bpy.context.object.data.edit_bones['Bip01_R_Calf']
@@ -573,8 +539,8 @@ def create_IKs():
     rightFoot = bpy.context.object.data.edit_bones['Bip01_R_Foot'] 
     leftFoot = bpy.context.object.data.edit_bones['Bip01_L_Foot'] 
 
-    # Determine knee IK offset.  Behind for chickenwalkers, forward for regular.
-    if rightCalf.head.y > rightFoot.tail.y:
+    # Determine knee IK offset.  Behind for chickenwalkers, forward for regular.  Edit mode required.
+    if armature.data.edit_bones['Bip01_R_Calf'].head.y > armature.data.edit_bones['Bip01_R_Calf'].tail.y:
         offset = 4
     else:
         offset = -4
@@ -648,8 +614,9 @@ def create_IKs():
     create_sphere_widget(armature, "Knee_IK.L", "Knee_IK.L")
     create_sphere_widget(armature, "Elbow_IK.R", "Elbow_IK.R")
     create_sphere_widget(armature, "Elbow_IK.L", "Elbow_IK.L")
-    #create_foot_widget(armature, "Bip01_R_Foot", 1.0, "Bip01_R_Foot")
-    #create_foot_widget(armature, "Bip01_L_Foot", 1.0, "Bip01_L_Foot")
+    create_circle_widget(armature, "Bip01_Pitch", 2.0, 1.0, True, "Bip01_Pitch")
+    create_circle_widget(armature, "Bip01_Pelvis", 2.0, 0.0, True, "Bip01_Pelvis")
+    create_cube_widget(armature, "Hip_Root", 3.0, "Hip_Root")
 
     bpy.data.objects[WGT_PREFIX + armature.name + "_" + "Root"].rotation_euler = (0,0,0)
 
@@ -662,9 +629,11 @@ def create_IKs():
     armature.pose.bones['Knee_IK.L'].custom_shape = bpy.data.objects[WGT_PREFIX + armature.name + "_" + "Knee_IK.L"]
     armature.pose.bones['Elbow_IK.R'].custom_shape = bpy.data.objects[WGT_PREFIX + armature.name + "_" + "Elbow_IK.R"]
     armature.pose.bones['Elbow_IK.L'].custom_shape = bpy.data.objects[WGT_PREFIX + armature.name + "_" + "Elbow_IK.L"]
-    #armature.pose.bones['Bip01_L_Foot'].custom_shape = bpy.data.objects[WGT_PREFIX + armature.name + "_" + "Bip01_L_Foot"]
-    #armature.pose.bones['Bip01_R_Foot'].custom_shape = bpy.data.objects[WGT_PREFIX + armature.name + "_" + "Bip01_R_Foot"]
+    armature.pose.bones['Bip01_Pitch'].custom_shape = bpy.data.objects[WGT_PREFIX + armature.name + "_" + "Bip01_Pitch"]
+    armature.pose.bones['Bip01_Pelvis'].custom_shape = bpy.data.objects[WGT_PREFIX + armature.name + "_" + "Bip01_Pelvis"]
+    armature.pose.bones['Hip_Root'].custom_shape = bpy.data.objects[WGT_PREFIX + armature.name + "_" + "Hip_Root"]
 
+    # POSE MODE CHANGES
     # Set up IK Constraints
     bpy.ops.object.mode_set(mode='POSE')
     bpose = bpy.context.object.pose
@@ -769,6 +738,9 @@ def create_IKs():
     rightHand.use_inherit_rotation = False
     leftElbowIK.use_inherit_rotation = False
     rightElbowIK.use_inherit_rotation = False
+
+    # Move bones to proper layers
+    set_bone_layers(armature)
 
 def import_geometry(cdffile, basedir, bodydir, mechname):
     armature = bpy.data.objects['Armature']
@@ -882,10 +854,6 @@ def import_mech(context, filepath, *, use_dds=True, use_tif=False):
     matfile = os.path.join(bodydir, mech + "_body.mtl")
     cockpit_matfile = os.path.join(mechdir, "cockpit_standard", mech + 
                                    "_a_cockpit_standard.mtl")
-
-    # Create the bone shapes.  Lots of ops operations, so start it at the 
-    # beginning where draw calls aren't as expensive.
-    #create_bone_shapes()  # Now using Rigify options
 
     bpy.context.scene.render.engine = 'CYCLES'      # Set to cycles mode
     
