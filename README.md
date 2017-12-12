@@ -1,6 +1,6 @@
 # Mech Importer
 
-## Mech Importer has been converted to a Blender Add-on!##
+## Mech Importer has been converted to a Blender Add-on!
 
 ### Features:
 * Imports a fully rigged mech with standard materials into Blender with the Cycles render engine.
