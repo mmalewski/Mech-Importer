@@ -1,3 +1,5 @@
+# This project is archived. All features have been migrated to [Cryengine Importer](https://github.com/markemp/cryengine-importer).
+
 # Mech Importer
 
 ## Mech Importer has been converted to a Blender Add-on!
